@@ -1,0 +1,22 @@
+{
+  "$comment": "Runtime policy. This file cannot enable paid models. It can only make the free-only policy stricter.",
+  "policy": {
+    "require_verified_free": false,
+    "allow_unverified_free_if_manually_approved": true,
+    "fallback_on_rate_limit": true,
+    "fallback_on_quota_exhausted": false,
+    "fallback_on_provider_unavailable": true,
+    "fallback_on_model_unavailable": true,
+    "fallback_on_timeout": true,
+    "fallback_on_invalid_response": true,
+    "fallback_on_schema_validation": true,
+    "schema_validation_retries": 2,
+    "max_fallback_candidates": 3
+  },
+  "retry": {
+    "base_delay_seconds": 1.0,
+    "max_delay_seconds": 30.0,
+    "jitter_seconds": 0.5,
+    "max_retry_after_seconds": 60.0
+  }
+}

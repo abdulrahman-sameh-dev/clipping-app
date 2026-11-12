@@ -1,0 +1,552 @@
+{
+  "clipping_ai/__init__.py": {
+    "mtime": 1794229335.6160696,
+    "ast_hash": "270391104dbdffd494281f78a749355b",
+    "semantic_hash": ""
+  },
+  "clipping_ai/analysis/__init__.py": {
+    "mtime": 1794247810.0144894,
+    "ast_hash": "a0540709a252b3ccc22b74c22abda8f2",
+    "semantic_hash": ""
+  },
+  "clipping_ai/analysis/config.py": {
+    "mtime": 1794401884.9710958,
+    "ast_hash": "620d361f59fa630390786f39bf03f441",
+    "semantic_hash": ""
+  },
+  "clipping_ai/analysis/service.py": {
+    "mtime": 1794316535.4344037,
+    "ast_hash": "8a1a66d2cb88e1135c65534f8adfd909",
+    "semantic_hash": ""
+  },
+  "clipping_ai/api/__init__.py": {
+    "mtime": 1794230140.0864043,
+    "ast_hash": "76a298e3a719867fe2503216ec10bf5c",
+    "semantic_hash": ""
+  },
+  "clipping_ai/api/app.py": {
+    "mtime": 1794332202.2620387,
+    "ast_hash": "1289c29158389735ae6cb16f68ad4c74",
+    "semantic_hash": ""
+  },
+  "clipping_ai/audio.py": {
+    "mtime": 1794229701.0488973,
+    "ast_hash": "7279fa6f97dddb8e8ba083021b63a796",
+    "semantic_hash": ""
+  },
+  "clipping_ai/cli.py": {
+    "mtime": 1794329579.5575802,
+    "ast_hash": "7c2307f6959959b074ecad955c202050",
+    "semantic_hash": ""
+  },
+  "clipping_ai/clips/__init__.py": {
+    "mtime": 1794314799.652176,
+    "ast_hash": "52ed87e937698a77657e440647d28f08",
+    "semantic_hash": ""
+  },
+  "clipping_ai/clips/captions.py": {
+    "mtime": 1794423055.6471756,
+    "ast_hash": "1005d9b20a75b047441b8d8f183e0c89",
+    "semantic_hash": ""
+  },
+  "clipping_ai/clips/config.py": {
+    "mtime": 1794422978.25795,
+    "ast_hash": "33d890618263dc3c83edbf04debefebf",
+    "semantic_hash": ""
+  },
+  "clipping_ai/clips/models.py": {
+    "mtime": 1794314423.1015,
+    "ast_hash": "77780ac0133b7b0f85a6c563ceda570b",
+    "semantic_hash": ""
+  },
+  "clipping_ai/clips/renderer.py": {
+    "mtime": 1794423183.8606758,
+    "ast_hash": "c44cb6e57891d14c8fd728270bfe46f4",
+    "semantic_hash": ""
+  },
+  "clipping_ai/clips/service.py": {
+    "mtime": 1794423318.229429,
+    "ast_hash": "81d09a6212affc94e14b0994de64c402",
+    "semantic_hash": ""
+  },
+  "clipping_ai/clips/store.py": {
+    "mtime": 1794315234.5868535,
+    "ast_hash": "2e7894a4c90be0e3f101e98b80a7f0ca",
+    "semantic_hash": ""
+  },
+  "clipping_ai/clips/worker.py": {
+    "mtime": 1794314796.2187972,
+    "ast_hash": "38aeb9ca9f1a3f411da20f0a8fee8348",
+    "semantic_hash": ""
+  },
+  "clipping_ai/errors.py": {
+    "mtime": 1794244950.2458534,
+    "ast_hash": "25ae3ea72dfd69b66a79bec9bde9956c",
+    "semantic_hash": ""
+  },
+  "clipping_ai/highlights/__init__.py": {
+    "mtime": 1794247810.0144894,
+    "ast_hash": "6c74f05af28394cdc478111044f4853d",
+    "semantic_hash": ""
+  },
+  "clipping_ai/highlights/candidates.py": {
+    "mtime": 1794403656.5795133,
+    "ast_hash": "f1ffcd2882d9db2f5934962829ea51c2",
+    "semantic_hash": ""
+  },
+  "clipping_ai/highlights/classification.py": {
+    "mtime": 1794329570.5223284,
+    "ast_hash": "ba4cfcd26ef986bd0d68eba42bbceefa",
+    "semantic_hash": ""
+  },
+  "clipping_ai/highlights/engine.py": {
+    "mtime": 1794401933.046961,
+    "ast_hash": "4b9666c4dc1c45e5c6fc11b13e9cfe31",
+    "semantic_hash": ""
+  },
+  "clipping_ai/highlights/llm.py": {
+    "mtime": 1794402081.0589347,
+    "ast_hash": "a44b3a34cf784a3a1f6bce855bf5f517",
+    "semantic_hash": ""
+  },
+  "clipping_ai/highlights/models.py": {
+    "mtime": 1794316376.3245308,
+    "ast_hash": "00077a03e75ae4f374592970efd447cc",
+    "semantic_hash": ""
+  },
+  "clipping_ai/highlights/signals.py": {
+    "mtime": 1794316404.8023334,
+    "ast_hash": "f4d019db8de5863366276790601ce2dc",
+    "semantic_hash": ""
+  },
+  "clipping_ai/jobs.py": {
+    "mtime": 1794230859.3573637,
+    "ast_hash": "811832973ef4712724df085c0b246f50",
+    "semantic_hash": ""
+  },
+  "clipping_ai/manager.py": {
+    "mtime": 1794237603.519119,
+    "ast_hash": "a1d744e57a6eee74a9ec5dbfe2b077b1",
+    "semantic_hash": ""
+  },
+  "clipping_ai/policy.py": {
+    "mtime": 1794229477.210728,
+    "ast_hash": "8a8223462e8e97a8ba122c0905723bed",
+    "semantic_hash": ""
+  },
+  "clipping_ai/providers/__init__.py": {
+    "mtime": 1794229559.3955228,
+    "ast_hash": "6addb2d5d10e2a47ddea91065af68fda",
+    "semantic_hash": ""
+  },
+  "clipping_ai/providers/base.py": {
+    "mtime": 1794229558.6873834,
+    "ast_hash": "407cc63227e4b1449aaa3212d3978d6e",
+    "semantic_hash": ""
+  },
+  "clipping_ai/providers/error_mapping.py": {
+    "mtime": 1794229622.3465345,
+    "ast_hash": "4e07717883a03233add6da92bceec608",
+    "semantic_hash": ""
+  },
+  "clipping_ai/providers/groq_speech.py": {
+    "mtime": 1794230597.3873403,
+    "ast_hash": "0c7dd17f23c6b497548c0a91eef5e5b9",
+    "semantic_hash": ""
+  },
+  "clipping_ai/providers/litellm_text.py": {
+    "mtime": 1794329387.028685,
+    "ast_hash": "4e573d00f81ecbdb5cad9d85fae61b48",
+    "semantic_hash": ""
+  },
+  "clipping_ai/providers/whisper_cpp.py": {
+    "mtime": 1794310897.0896635,
+    "ast_hash": "606735368f9a3e717d47a88522737a90",
+    "semantic_hash": ""
+  },
+  "clipping_ai/registry.py": {
+    "mtime": 1794237570.8998697,
+    "ast_hash": "2c23be23a337a29244725a1ad9e7a8b0",
+    "semantic_hash": ""
+  },
+  "clipping_ai/retry.py": {
+    "mtime": 1794230595.4233272,
+    "ast_hash": "b8b7addd1a0731c81c72b06124665d18",
+    "semantic_hash": ""
+  },
+  "clipping_ai/routing.py": {
+    "mtime": 1794229535.841759,
+    "ast_hash": "0c938cb95ed9b30860cf8b3c8929a9d2",
+    "semantic_hash": ""
+  },
+  "clipping_ai/schemas.py": {
+    "mtime": 1794230179.3790767,
+    "ast_hash": "11d81ac125b6b849744b263d88051cb9",
+    "semantic_hash": ""
+  },
+  "clipping_ai/settings.py": {
+    "mtime": 1794398773.8462474,
+    "ast_hash": "99aea3bdbfbac8d55e83d05cc19019bf",
+    "semantic_hash": ""
+  },
+  "clipping_ai/structured.py": {
+    "mtime": 1794402081.020215,
+    "ast_hash": "7441cd46590b8d8c98b1a8cd0c695f6b",
+    "semantic_hash": ""
+  },
+  "clipping_ai/throttle.py": {
+    "mtime": 1794230898.6009452,
+    "ast_hash": "b909f98eccc3acd0e9212c856be1390f",
+    "semantic_hash": ""
+  },
+  "clipping_ai/usage.py": {
+    "mtime": 1794230983.8293028,
+    "ast_hash": "069d4c56657a54776f151ffa790ed760",
+    "semantic_hash": ""
+  },
+  "clipping_ai/video/__init__.py": {
+    "mtime": 1794245038.05047,
+    "ast_hash": "2194dc85fdb48c4717dc4d7db7dbc1aa",
+    "semantic_hash": ""
+  },
+  "clipping_ai/video/audio.py": {
+    "mtime": 1794244933.198364,
+    "ast_hash": "8dd7a366606e59151057133662333af8",
+    "semantic_hash": ""
+  },
+  "clipping_ai/video/config.py": {
+    "mtime": 1794244875.0017397,
+    "ast_hash": "39705cceaeeb57bf2a32408b2c0b8fb5",
+    "semantic_hash": ""
+  },
+  "clipping_ai/video/ingest.py": {
+    "mtime": 1794244901.7516603,
+    "ast_hash": "901e20650d25f859df00c5b94e9823ee",
+    "semantic_hash": ""
+  },
+  "clipping_ai/video/metadata.py": {
+    "mtime": 1794244921.6463764,
+    "ast_hash": "ba44c056c3f965edf2f30a263b2bb668",
+    "semantic_hash": ""
+  },
+  "clipping_ai/video/models.py": {
+    "mtime": 1794247583.6427205,
+    "ast_hash": "daff7d816f6f55d41d8416df75946796",
+    "semantic_hash": ""
+  },
+  "clipping_ai/video/service.py": {
+    "mtime": 1794398773.8465533,
+    "ast_hash": "e9fa6a35bc72b7ff3388f027fe7edfba",
+    "semantic_hash": ""
+  },
+  "clipping_ai/video/store.py": {
+    "mtime": 1794247620.716397,
+    "ast_hash": "cfcdd78e83c53714145b71a9fb477786",
+    "semantic_hash": ""
+  },
+  "clipping_ai/video/worker.py": {
+    "mtime": 1794245033.7160175,
+    "ast_hash": "648e86457064989f0501be042e6c8e51",
+    "semantic_hash": ""
+  },
+  "config/analysis.json": {
+    "mtime": 1794401885.0168777,
+    "ast_hash": "725c61791b7725b21ec83d63561b7e65",
+    "semantic_hash": ""
+  },
+  "config/clips.json": {
+    "mtime": 1794422974.3897643,
+    "ast_hash": "229f35522f0305703d896dbcc3fa9e68",
+    "semantic_hash": ""
+  },
+  "config/models.json": {
+    "mtime": 1794229279.3729217,
+    "ast_hash": "51776fabe4c490e34c967969602605bc",
+    "semantic_hash": ""
+  },
+  "config/policy.json": {
+    "mtime": 1794229322.3808053,
+    "ast_hash": "761a123f099e39920a8b1754fc242c00",
+    "semantic_hash": ""
+  },
+  "config/providers.json": {
+    "mtime": 1794229232.3288207,
+    "ast_hash": "295d9c361411f3f0298c7e83cd76fca0",
+    "semantic_hash": ""
+  },
+  "config/routing.json": {
+    "mtime": 1794229304.9004507,
+    "ast_hash": "06a53afeb8e9d3732c87f746e16d7dea",
+    "semantic_hash": ""
+  },
+  "config/video.json": {
+    "mtime": 1794245043.588592,
+    "ast_hash": "86129584c4884f0f705e6bf91e02441a",
+    "semantic_hash": ""
+  },
+  "pyproject.toml": {
+    "mtime": 1794244804.5860865,
+    "ast_hash": "8d0a8eed4fe644f8145752aa40a71bc2",
+    "semantic_hash": ""
+  },
+  "tests/__init__.py": {
+    "mtime": 1794230298.3757994,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": ""
+  },
+  "tests/helpers.py": {
+    "mtime": 1794230523.3056588,
+    "ast_hash": "9b3dcfae8a695a62831323b05b63e4a5",
+    "semantic_hash": ""
+  },
+  "tests/test_analysis_api.py": {
+    "mtime": 1794316965.1996846,
+    "ast_hash": "475c8eda5394c66b9d465137e38d3cb4",
+    "semantic_hash": ""
+  },
+  "tests/test_analysis_cli.py": {
+    "mtime": 1794310964.3201344,
+    "ast_hash": "34fd44dfddd2ea943e3f22aba4d0257e",
+    "semantic_hash": ""
+  },
+  "tests/test_analysis_service.py": {
+    "mtime": 1794402784.2361016,
+    "ast_hash": "91ecef046401726cb217504ced2a79e9",
+    "semantic_hash": ""
+  },
+  "tests/test_api.py": {
+    "mtime": 1794230594.1426656,
+    "ast_hash": "3123431e2d9a24bef728230cc9d92204",
+    "semantic_hash": ""
+  },
+  "tests/test_audio.py": {
+    "mtime": 1794230394.1205194,
+    "ast_hash": "625a4ca3581bb3cfab78072c60f82329",
+    "semantic_hash": ""
+  },
+  "tests/test_cli.py": {
+    "mtime": 1794231142.6980932,
+    "ast_hash": "f8f19a64ac0f287b3897122ed627e4cb",
+    "semantic_hash": ""
+  },
+  "tests/test_clips.py": {
+    "mtime": 1794398938.3258781,
+    "ast_hash": "06fc640d5f88c19977355870dbd84c98",
+    "semantic_hash": ""
+  },
+  "tests/test_clips_cli.py": {
+    "mtime": 1794315073.762534,
+    "ast_hash": "668365e4cec943c8ca642afbd2ccf2ed",
+    "semantic_hash": ""
+  },
+  "tests/test_errors.py": {
+    "mtime": 1794230448.0325646,
+    "ast_hash": "76fc30c2312cd7a23ad0dc22b0fbd0b2",
+    "semantic_hash": ""
+  },
+  "tests/test_highlights.py": {
+    "mtime": 1794403273.5431366,
+    "ast_hash": "5817ab12f24fc2985443922884f3319d",
+    "semantic_hash": ""
+  },
+  "tests/test_live.py": {
+    "mtime": 1794238297.7972603,
+    "ast_hash": "e9db3203aa31c519764bea46ec053953",
+    "semantic_hash": ""
+  },
+  "tests/test_manager.py": {
+    "mtime": 1794238368.161653,
+    "ast_hash": "af10f5252dce1b73d00159eaf80f4348",
+    "semantic_hash": ""
+  },
+  "tests/test_policy.py": {
+    "mtime": 1794230317.7515123,
+    "ast_hash": "674c5c5fc11c05eb4f0308856ceb3620",
+    "semantic_hash": ""
+  },
+  "tests/test_providers.py": {
+    "mtime": 1794329109.799596,
+    "ast_hash": "b80594e34e4458f59c099a231d9c537e",
+    "semantic_hash": ""
+  },
+  "tests/test_registry.py": {
+    "mtime": 1794398950.5148268,
+    "ast_hash": "050e28dff54b5269783919e017fbda6f",
+    "semantic_hash": ""
+  },
+  "tests/test_routing.py": {
+    "mtime": 1794230324.3533566,
+    "ast_hash": "d4d7ddcc739d504d0dcbb2f7194b409e",
+    "semantic_hash": ""
+  },
+  "tests/test_structured.py": {
+    "mtime": 1794230328.4456866,
+    "ast_hash": "08591e459ac736bc5fe0b3ebb627e4d1",
+    "semantic_hash": ""
+  },
+  "tests/test_throttle.py": {
+    "mtime": 1794230902.5958855,
+    "ast_hash": "2276bbf6f8c42846b352b86801a9ed51",
+    "semantic_hash": ""
+  },
+  "tests/test_video_api.py": {
+    "mtime": 1794245273.2185516,
+    "ast_hash": "4f0246499d1f28f46f8ed4029488f4f0",
+    "semantic_hash": ""
+  },
+  "tests/test_video_cli.py": {
+    "mtime": 1794245286.7347548,
+    "ast_hash": "44c41a6eb2b84c5d46403aeb4b24c6a8",
+    "semantic_hash": ""
+  },
+  "tests/test_video_config.py": {
+    "mtime": 1794245200.902964,
+    "ast_hash": "403a1d067674700deff544b4b1e1770d",
+    "semantic_hash": ""
+  },
+  "tests/test_video_ingest.py": {
+    "mtime": 1794245342.2176232,
+    "ast_hash": "f87467fa0bcf9c08e3e6b9db0359a15c",
+    "semantic_hash": ""
+  },
+  "tests/test_video_media.py": {
+    "mtime": 1794245225.7923112,
+    "ast_hash": "ebc848adc39aa3ccdfb1442f9875d174",
+    "semantic_hash": ""
+  },
+  "tests/test_video_service.py": {
+    "mtime": 1794245361.5468206,
+    "ast_hash": "1944e0885ef74847993a08859de043ba",
+    "semantic_hash": ""
+  },
+  "tests/test_video_store.py": {
+    "mtime": 1794245213.8198233,
+    "ast_hash": "4e00dcd8fc20f913ea342cc06cde545e",
+    "semantic_hash": ""
+  },
+  "tests/video_helpers.py": {
+    "mtime": 1794245185.2981482,
+    "ast_hash": "5b995db990eada23b0d8a45f3f89f9fa",
+    "semantic_hash": ""
+  },
+  "ARCHITECTURE.md": {
+    "mtime": 1794423655.773328,
+    "ast_hash": "48ffbd76e2bd10abd144052fc98d8973",
+    "semantic_hash": ""
+  },
+  "CONFIGURATION.md": {
+    "mtime": 1794423646.4509902,
+    "ast_hash": "fc349c26a02d3c480a639fdcdb8419aa",
+    "semantic_hash": ""
+  },
+  "FREE_TIER_POLICY.md": {
+    "mtime": 1794238311.3191402,
+    "ast_hash": "ded1dac71b6bc40871657dad061ff04c",
+    "semantic_hash": ""
+  },
+  "PROJECT-STATUS.md": {
+    "mtime": 1794423672.7089753,
+    "ast_hash": "58671717fbae7a096cd8cf200abbc497",
+    "semantic_hash": ""
+  },
+  "PROVIDERS.md": {
+    "mtime": 1794310917.7591765,
+    "ast_hash": "dc3dd204c45a521a449082c0110c9c09",
+    "semantic_hash": ""
+  },
+  "README.md": {
+    "mtime": 1794423683.799218,
+    "ast_hash": "3d2c0276cafd0a68def5888b38ba246e",
+    "semantic_hash": ""
+  },
+  "TESTING.md": {
+    "mtime": 1794423663.1923726,
+    "ast_hash": "d92b52f930033968b534952d6837f8b9",
+    "semantic_hash": ""
+  },
+  "clipping_ai/frontend/js/api.js": {
+    "mtime": 1794334103.619298,
+    "ast_hash": "9e170b73b8e1a346c7ee042a8fec1342",
+    "semantic_hash": ""
+  },
+  "clipping_ai/frontend/js/app.js": {
+    "mtime": 1794334760.9159992,
+    "ast_hash": "e4a5abece653bd4fe50b4ec6330a5e18",
+    "semantic_hash": ""
+  },
+  "clipping_ai/frontend/js/i18n.js": {
+    "mtime": 1794335570.0691953,
+    "ast_hash": "7a7730b23cd492f38958af516add33c4",
+    "semantic_hash": ""
+  },
+  "clipping_ai/frontend/js/ui.js": {
+    "mtime": 1794335554.7301047,
+    "ast_hash": "8d3cbcbfd7e23adc7419f890d1bd9897",
+    "semantic_hash": ""
+  },
+  "package.json": {
+    "mtime": 1794334608.143127,
+    "ast_hash": "d6082824ef5e2791791c5a4b87963374",
+    "semantic_hash": ""
+  },
+  "scripts/acceptance_validate.py": {
+    "mtime": 1794328384.1100593,
+    "ast_hash": "8da5787837d2bcde2d53abbb08890f9a",
+    "semantic_hash": ""
+  },
+  "scripts/start_local.sh": {
+    "mtime": 1794396255.3682604,
+    "ast_hash": "38cc95fbc390fd1a9f5a437a6a28c6ed",
+    "semantic_hash": ""
+  },
+  "tests/e2e/studio-smoke.mjs": {
+    "mtime": 1794334608.1451266,
+    "ast_hash": "85367c65147dfa929481ee5d06795f91",
+    "semantic_hash": ""
+  },
+  "tests/test_frontend.py": {
+    "mtime": 1794334498.836283,
+    "ast_hash": "ee4903cd6e1d2ab038284763b93a4db0",
+    "semantic_hash": ""
+  },
+  "ACCEPTANCE-TESTING.md": {
+    "mtime": 1794329819.79222,
+    "ast_hash": "ba491a38bd00fec2a616d85b1bf434f3",
+    "semantic_hash": ""
+  },
+  "DESIGN.md": {
+    "mtime": 1794332192.1706283,
+    "ast_hash": "aeb3d7b15b3f9087881a213ac1743454",
+    "semantic_hash": ""
+  },
+  "PRODUCT.md": {
+    "mtime": 1794332178.5218568,
+    "ast_hash": "34965d9f98c973ea00a498d5a0cacc23",
+    "semantic_hash": ""
+  },
+  "TEST-RESULTS.md": {
+    "mtime": 1794329934.7931406,
+    "ast_hash": "24b80cd17524da20ca4684ee7d59c702",
+    "semantic_hash": ""
+  },
+  "clipping_ai/frontend/index.html": {
+    "mtime": 1794334173.3191476,
+    "ast_hash": "831d8325be8328f349beaaf3fc35cc88",
+    "semantic_hash": ""
+  },
+  "clipping_ai/clips/editing.py": {
+    "mtime": 1794423439.7849343,
+    "ast_hash": "17a2dc14c1a9f9a8c7206fbd9ae6aa2c",
+    "semantic_hash": ""
+  },
+  "clipping_ai/highlights/semantic.py": {
+    "mtime": 1794403858.9302635,
+    "ast_hash": "0276b8c744304ae8ef3ec4560739c115",
+    "semantic_hash": ""
+  },
+  "tests/test_editing.py": {
+    "mtime": 1794423418.36404,
+    "ast_hash": "9f7863bbc554c5fecfc7dc63fa940807",
+    "semantic_hash": ""
+  }
+}

@@ -1,0 +1,61 @@
+[project]
+name = "clipping-ai"
+version = "0.1.0"
+description = "Standalone, free-tier-only AI provider system for a personal AI Clipping Studio"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Clipping Studio" }]
+dependencies = [
+    "litellm>=1.70",
+    "pydantic>=2.8",
+    "pydantic-settings>=2.4",
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "groq>=0.11",
+    "httpx>=0.27",
+    "yt-dlp>=2025.1",
+    "python-multipart>=0.0.9",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "respx>=0.21",
+    "ruff>=0.6",
+    "mypy>=1.10",
+]
+
+[project.scripts]
+clipping-ai = "clipping_ai.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["clipping_ai"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = [
+    "live: tests that call real provider APIs (require credentials and are skipped by default)",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+ignore = ["E501", "B008"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+warn_unused_ignores = false

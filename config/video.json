@@ -1,0 +1,37 @@
+{
+  "$comment": "Local video ingestion and preparation. No transcription, highlight detection, or clip rendering happens here.",
+  "video": {
+    "enabled": true,
+    "max_upload_bytes": 2147483648,
+    "max_duration_seconds": 21600,
+    "allowed_extensions": [
+      ".mp4",
+      ".mkv",
+      ".mov",
+      ".webm",
+      ".avi",
+      ".m4v",
+      ".mpeg",
+      ".mpg",
+      ".ts",
+      ".flv",
+      ".wmv"
+    ],
+    "duplicate_detection": true,
+    "ffmpeg_binary": "ffmpeg",
+    "ffprobe_binary": "ffprobe",
+    "metadata_timeout_seconds": 60,
+    "download_timeout_seconds": 1800,
+    "extract_timeout_seconds": 3600,
+    "chunk_timeout_seconds": 300,
+    "audio_sample_rate": 16000,
+    "audio_channels": 1,
+    "audio_codec": "flac",
+    "chunk_seconds": 600,
+    "chunk_overlap_seconds": 0,
+    "yt_dlp_format": "bv*[height<=1080]+ba/b[height<=1080]/b",
+    "url_schemes": ["http", "https"],
+    "cleanup_temp": true,
+    "worker_poll_seconds": 1
+  }
+}

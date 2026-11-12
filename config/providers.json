@@ -1,0 +1,68 @@
+{
+  "$comment": "Provider runtime configuration. API keys are NEVER stored here; only environment variable names.",
+  "providers": {
+    "gemini": {
+      "type": "litellm",
+      "enabled": true,
+      "api_key_env": "GEMINI_API_KEY",
+      "litellm_prefix": "gemini/",
+      "timeout_seconds": 90,
+      "max_retries": 2,
+      "min_interval_seconds": 1.0,
+      "requests_per_minute": 15,
+      "requests_per_day": 0,
+      "notes": "Google AI Studio free tier. Paid Gemini models are never registered as free."
+    },
+    "openrouter": {
+      "type": "litellm",
+      "enabled": true,
+      "api_key_env": "OPENROUTER_API_KEY",
+      "litellm_prefix": "openrouter/",
+      "timeout_seconds": 120,
+      "max_retries": 2,
+      "min_interval_seconds": 2.0,
+      "requests_per_minute": 20,
+      "requests_per_day": 0,
+      "extra_headers": {
+        "HTTP-Referer": "http://127.0.0.1",
+        "X-Title": "Personal AI Clipping Studio"
+      },
+      "notes": "Only model IDs explicitly registered and approved as free are used."
+    },
+    "groq": {
+      "type": "litellm",
+      "enabled": true,
+      "api_key_env": "GROQ_API_KEY",
+      "litellm_prefix": "groq/",
+      "timeout_seconds": 90,
+      "max_retries": 2,
+      "min_interval_seconds": 1.0,
+      "requests_per_minute": 25,
+      "requests_per_day": 0,
+      "notes": "Groq free plan text models. Speech lives in the separate groq_speech provider."
+    },
+    "groq_speech": {
+      "type": "groq_speech",
+      "enabled": true,
+      "api_key_env": "GROQ_API_KEY",
+      "timeout_seconds": 300,
+      "max_retries": 3,
+      "max_audio_bytes": 25000000,
+      "chunk_seconds": 600,
+      "chunk_overlap_seconds": 0,
+      "ffmpeg_binary": "ffmpeg",
+      "requests_per_minute": 15,
+      "requests_per_day": 0,
+      "notes": "Groq free-tier transcription. 25 MB request limit; larger files are chunked when ffmpeg is available."
+    },
+    "whisper_cpp": {
+      "type": "whisper_cpp",
+      "enabled": false,
+      "binary": "whisper-cli",
+      "model_path": "",
+      "extra_args": [],
+      "timeout_seconds": 1800,
+      "notes": "Optional local CPU provider. Point binary/model_path at an existing installation; nothing is downloaded."
+    }
+  }
+}

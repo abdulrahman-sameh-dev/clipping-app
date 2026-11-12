@@ -1,0 +1,11 @@
+{
+  "name": "clipping-studio-ui-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:e2e": "node tests/e2e/studio-smoke.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.65.0"
+  }
+}
