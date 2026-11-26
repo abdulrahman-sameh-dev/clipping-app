@@ -16,7 +16,7 @@ import threading
 import time
 import webbrowser
 from collections.abc import Callable
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, quote, urlencode, urlparse
@@ -32,12 +32,16 @@ SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets.readonly"
 ANALYTICS_SCOPE = "https://www.googleapis.com/auth/yt-analytics.readonly"
 YOUTUBE_READ_SCOPE = "https://www.googleapis.com/auth/youtube.readonly"
 UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
+# Changing the publish time of a video that already exists needs a wider scope than upload:
+# youtube.force-ssl lets the app edit the channel's videos. It is a separate, optional sign-in.
+MANAGE_SCOPE = "https://www.googleapis.com/auth/youtube.force-ssl"
 # One sign-in per kind. "analytics" also reads the channel's own video list (read-only) so the
 # tool can see what is already scheduled. "upload" is the only scope that can publish.
 SCOPES = {
     "sheets": SHEETS_SCOPE,
     "analytics": f"{ANALYTICS_SCOPE} {YOUTUBE_READ_SCOPE}",
     "upload": UPLOAD_SCOPE,
+    "manage": MANAGE_SCOPE,
 }
 GLOBAL_KINDS = {"sheets"}  # one Google account for sheets; analytics and upload are per channel
 DEFAULT_CHANNEL = "default"
@@ -541,3 +545,99 @@ def fetch_channel_schedule(
             client.close()
     videos.sort(key=lambda v: v["publish_at"])
     return {"channel": info, "videos": videos}
+
+
+_WRITABLE_STATUS = (
+    "embeddable",
+    "license",
+    "publicStatsViewable",
+    "selfDeclaredMadeForKids",
+)
+
+
+def _put(http: httpx.Client, url: str, token: str, what: str, params: dict[str, str], body: Any):
+    try:
+        response = http.put(
+            url,
+            params=params,
+            json=body,
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=30.0,
+        )
+    except httpx.HTTPError as exc:
+        raise AIError(
+            ErrorCategory.PROVIDER_UNAVAILABLE,
+            f"Could not reach Google ({what}). Check the internet connection.",
+            provider="google",
+            retryable=True,
+        ) from exc
+    if response.status_code != 200:
+        raise _google_error(response, what)
+    return response.json()
+
+
+def set_video_publish_at(
+    video_id: str,
+    publish_at: datetime,
+    token_provider: Callable[[], str],
+    *,
+    now: datetime,
+    http: httpx.Client | None = None,
+) -> str:
+    """Move one video that is already scheduled to a new publish time. Returns the new time.
+
+    Only a video that is private with a future `publishAt` is touched: a video that is already
+    public (or never scheduled) is refused, so this can never publish or hide anything. The other
+    writable status fields are sent back unchanged because the update replaces the whole status.
+    """
+    if not _VIDEO_ID.match(video_id):
+        raise AIError(
+            ErrorCategory.INVALID_REQUEST, "Invalid video id.", provider="youtube", retryable=False
+        )
+    if publish_at.tzinfo is None or publish_at <= now:
+        raise AIError(
+            ErrorCategory.INVALID_REQUEST,
+            "The new time must be in the future.",
+            provider="youtube",
+            retryable=False,
+        )
+    owns = http is None
+    client = http or httpx.Client()
+    try:
+        token = token_provider()
+        current = _get(
+            client, f"{YOUTUBE_API}/videos", token, "video", {"part": "status", "id": video_id}
+        )
+        items = current.get("items") or []
+        if not items:
+            raise AIError(
+                ErrorCategory.NOT_FOUND,
+                "That video was not found on the signed-in channel.",
+                provider="youtube",
+                retryable=False,
+            )
+        status = items[0].get("status", {})
+        old = _parse_when(status.get("publishAt"))
+        if status.get("privacyStatus") != "private" or old is None or old <= now:
+            raise AIError(
+                ErrorCategory.INVALID_REQUEST,
+                "That video is not waiting for a scheduled release any more, so its time was "
+                "not changed.",
+                provider="youtube",
+                retryable=False,
+            )
+        new_status = {k: status[k] for k in _WRITABLE_STATUS if k in status}
+        new_status["privacyStatus"] = "private"
+        new_status["publishAt"] = publish_at.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        _put(
+            client,
+            f"{YOUTUBE_API}/videos",
+            token,
+            "video update",
+            {"part": "status"},
+            {"id": video_id, "status": new_status},
+        )
+    finally:
+        if owns:
+            client.close()
+    return publish_at.isoformat()
