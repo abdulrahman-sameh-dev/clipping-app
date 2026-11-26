@@ -20,8 +20,11 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     auth.add_argument(
         "kind",
         choices=sorted(google.SCOPES),
-        help="sheets: read your private Google Sheet. analytics: read YouTube Analytics.",
+        help="sheets: read your private Google Sheet. analytics: read YouTube Analytics and the "
+        "channel's scheduled videos. upload: upload and schedule clips. The web UI (Pipeline "
+        "page, Connections) does the same without the terminal.",
     )
+    auth.add_argument("--channel", default=google.DEFAULT_CHANNEL, help="Channel id.")
 
 
 def run_pipeline(
@@ -34,12 +37,11 @@ def run_pipeline(
     command = args.pipeline_command
     if command == "status":
         for kind in sorted(google.SCOPES):
-            print(
-                f"{kind}: {'signed in' if google.is_authorised(settings.data_dir, kind) else 'not signed in'}"
-            )
+            done = google.is_authorised(settings.data_dir, kind, google.DEFAULT_CHANNEL, yt)
+            print(f"{kind}: {'signed in' if done else 'not signed in'}")
         return 0
     if command == "auth":
-        google.authorize(args.kind, yt, settings.data_dir)
+        google.authorize(args.kind, yt, settings.data_dir, channel_id=args.channel)
         print(
             f"Signed in ({args.kind}, read-only). The token is stored locally and is not part "
             "of the repository."
