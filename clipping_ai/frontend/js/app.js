@@ -5,6 +5,7 @@ import { createTrimEditor } from "./trim-editor.js";
 import * as ui from "./ui.js";
 import { pipelineDayView, pipelineText, pipelineView } from "./pipeline.js";
 import { mountYoutubePanel, youtubePanelHtml } from "./youtube.js";
+import { facebookPanelHtml, mountFacebookPanel } from "./facebook.js";
 
 const main = document.getElementById("main");
 const sidebar = document.getElementById("sidebar");
@@ -2528,6 +2529,7 @@ async function clipDetailView(route, token) {
           <p class="field-hint">${ui.esc(t("clips.manualPublishOnly"))}</p>
         </section>
         ${ready ? youtubePanelHtml(clip) : ""}
+        ${ready ? facebookPanelHtml(clip) : ""}
         <section class="form-section">
           <div class="form-section-header">
             <div><h3>${ui.esc(t("clips.sourceJob"))}</h3><p>${ui.esc(t("clips.sourceJobHint"))}</p></div>
@@ -2649,6 +2651,7 @@ async function clipDetailView(route, token) {
         }
       });
       if (ready) mountYoutubePanel(main, clip);
+      if (ready) mountFacebookPanel(main, clip);
       main.querySelector("#clip-published")?.addEventListener("change", async (event) => {
         const checkbox = event.currentTarget;
         try {
