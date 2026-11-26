@@ -1,0 +1,14 @@
+/* YouTube upload panel on the clip detail page. */
+.yt-panel .field { display: grid; gap: 6px; margin-block: 12px; }
+.yt-panel select,
+.yt-panel input[type="datetime-local"] { max-width: 100%; }
+.yt-panel .code-block {
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(127, 127, 127, 0.12);
+  overflow-x: auto;
+  user-select: all;
+}
+.yt-panel .form-actions { margin-top: 14px; }
+.yt-panel [hidden] { display: none !important; }
