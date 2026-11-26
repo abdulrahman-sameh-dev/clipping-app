@@ -265,6 +265,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     add_youtube_arguments(youtube)
 
+    pipeline = sub.add_parser(
+        "pipeline",
+        help="Read-only Google sign-ins for the Pipeline page (private Sheet, Analytics).",
+    )
+    from clipping_ai.pipeline.cli import add_arguments as add_pipeline_arguments
+
+    add_pipeline_arguments(pipeline)
+
     return parser
 
 
@@ -472,6 +480,11 @@ def _run(args: argparse.Namespace) -> int:
             log_level=settings.log_level.lower(),
         )
         return 0
+
+    if args.command == "pipeline":
+        from clipping_ai.pipeline.cli import run_pipeline
+
+        return run_pipeline(args, settings=settings)
 
     if args.command == "youtube":
         from clipping_ai.youtube.cli import run_youtube
