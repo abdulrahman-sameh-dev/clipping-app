@@ -176,6 +176,7 @@ def register_connection_routes(
                     "schedule_ready": google.can_read_schedule(data_dir, channel_id, yt),
                 },
                 "upload": {"connected": google.is_authorised(data_dir, "upload", channel_id, yt)},
+                "manage": {"connected": google.is_authorised(data_dir, "manage", channel_id, yt)},
             },
         }
 
