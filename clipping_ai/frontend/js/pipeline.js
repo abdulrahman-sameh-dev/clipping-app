@@ -159,6 +159,50 @@ const TEXT = {
     planBlind: "The channel's schedule is unknown, so the plan may overlap videos you scheduled yourself.",
     allowUnknown: "Upload anyway without the channel schedule",
     "tip.schedule_unknown": "The channel's own schedule is not known, so the free days below only count this tool's uploads. Connect YouTube Analytics and schedule.",
+    "conn.manage": "Edit scheduled times on YouTube",
+    "conn.manageHint": "Optional. Only needed to change the release time of videos already scheduled (day page and reschedule). Wider permission: it can edit your channel's videos, but this app only changes the time of videos that are still waiting to go live, and only after you confirm.",
+    dayOpen: "Open this day",
+    dayBack: "Back to Pipeline",
+    dayPrev: "Previous day",
+    dayNext: "Next day",
+    dayTitle: "Schedule for {d}",
+    dayPast: "This day is in the past. It is shown for reference only.",
+    dayNone: "Nothing is scheduled on this day.",
+    dayVideos: "Scheduled videos",
+    dayMove: "Move",
+    dayMoveTitle: "Change release time",
+    dayMoveAsk: "Move \"{t}\" from {a} to {b}? Nothing else about the video changes.",
+    dayMoved: "Release time changed.",
+    dayNeedManage: "To change times here, connect \"Edit scheduled times on YouTube\" in Connections on the Pipeline page. Until then this page is read-only.",
+    dayAdd: "Add a ready clip to this day",
+    dayAddHint: "Uploads the clip privately and YouTube publishes it at the time you pick.",
+    dayAddNone: "No ready clips are waiting.",
+    dayAddBtn: "Upload and schedule here",
+    dayAddAsk: "Upload \"{t}\" as private and schedule it for {b}?",
+    dayAdded: "Uploaded privately and scheduled.",
+    dayNeedUpload: "Uploading needs the YouTube upload connection (Connections on the Pipeline page).",
+    dayPickClip: "Clip",
+    dayTime: "Time",
+    dayOpenStudio: "Studio",
+    dayTooSoon: "Pick a time at least 30 minutes from now.",
+    resched: "Reschedule by analytics",
+    reschedHint: "Looks at which publish hours got more views per day and proposes new times for videos that are already scheduled. It shows old and new times first. Nothing changes on YouTube until you confirm.",
+    reschedBuild: "Build reschedule plan",
+    reschedNeedManage: "Applying needs \"Edit scheduled times on YouTube\" (Connections). You can still see the plan.",
+    reschedNumbers: "Based on {n} past video(s). Numbers read {t}. Refresh the analytics above first if they are old.",
+    reschedNoNumbers: "No analytics numbers have been read yet. Refresh the analytics above first.",
+    "reschedWhy.not_enough_videos": "Not enough data to judge posting times: only {n} past video(s) have numbers, and at least {m} are needed. Nothing was changed.",
+    "reschedWhy.not_enough_hours": "Not enough variety: the videos were all posted at nearly the same hour, so there is nothing to compare. Nothing was changed.",
+    "reschedWhy.no_clear_difference": "The publish hours performed about the same (best hour is less than {x} times the others). Changing times would be a guess, so nothing was changed.",
+    reschedBest: "Best hours so far (views per day, median): {h}.",
+    reschedNothing: "All scheduled videos already sit at the best hours.",
+    reschedNoUpcoming: "Nothing is scheduled to change.",
+    reschedSkipped: "{n} video(s) due very soon were left alone.",
+    reschedCapped: "Only the first {n} changes are shown. Run it again after applying.",
+    reschedOld: "Now",
+    reschedNew: "New",
+    reschedApply: "Confirm: change these times on YouTube",
+    reschedDone: "Times changed: {ok}. Not changed: {bad}.",
   },
   ar: {
     nav: "خط الإنتاج",
@@ -313,6 +357,50 @@ const TEXT = {
     planBlind: "جدولة القناة غير معروفة، فقد تتداخل الخطة مع فيديوهات جدولتها بنفسك.",
     allowUnknown: "ارفع رغم ذلك بدون جدولة القناة",
     "tip.schedule_unknown": "جدولة القناة نفسها غير معروفة، فالأيام الفاضية بالأسفل تحسب رفعات هذه الأداة فقط. اربط تحليلات YouTube والجدولة.",
+    "conn.manage": "تعديل مواعيد النشر على YouTube",
+    "conn.manageHint": "اختياري. لازم فقط لتغيير موعد نشر فيديوهات مجدولة بالفعل (صفحة اليوم وإعادة الجدولة). صلاحية أوسع: تسمح بتعديل فيديوهات قناتك، لكن التطبيق يغيّر فقط موعد الفيديوهات التي لم تُنشر بعد، وبعد تأكيدك فقط.",
+    dayOpen: "افتح هذا اليوم",
+    dayBack: "الرجوع لخط الإنتاج",
+    dayPrev: "اليوم السابق",
+    dayNext: "اليوم التالي",
+    dayTitle: "جدول يوم {d}",
+    dayPast: "هذا اليوم في الماضي. معروض للاطلاع فقط.",
+    dayNone: "لا يوجد شيء مجدول في هذا اليوم.",
+    dayVideos: "الفيديوهات المجدولة",
+    dayMove: "نقل",
+    dayMoveTitle: "تغيير موعد النشر",
+    dayMoveAsk: "نقل \"{t}\" من {a} إلى {b}؟ لا يتغير أي شيء آخر في الفيديو.",
+    dayMoved: "تم تغيير موعد النشر.",
+    dayNeedManage: "لتغيير المواعيد من هنا اربط \"تعديل مواعيد النشر على YouTube\" من قسم الربط في صفحة خط الإنتاج. حتى ذلك الحين الصفحة للقراءة فقط.",
+    dayAdd: "أضف كليبًا جاهزًا لهذا اليوم",
+    dayAddHint: "يرفع الكليب كخاص ويقوم YouTube بنشره في الموعد الذي تختاره.",
+    dayAddNone: "لا توجد كليبات جاهزة.",
+    dayAddBtn: "ارفع وجدول هنا",
+    dayAddAsk: "رفع \"{t}\" كخاص وجدولته على {b}؟",
+    dayAdded: "تم الرفع كخاص والجدولة.",
+    dayNeedUpload: "الرفع يحتاج ربط رفع YouTube (قسم الربط في صفحة خط الإنتاج).",
+    dayPickClip: "الكليب",
+    dayTime: "الوقت",
+    dayOpenStudio: "Studio",
+    dayTooSoon: "اختر وقتًا بعد 30 دقيقة على الأقل من الآن.",
+    resched: "إعادة الجدولة حسب التحليلات",
+    reschedHint: "ينظر في أي ساعات نشر حققت مشاهدات أكثر في اليوم، ويقترح مواعيد جديدة للفيديوهات المجدولة بالفعل. يعرض لك القديم والجديد أولًا. لا يتغير شيء على YouTube إلا بعد تأكيدك.",
+    reschedBuild: "ابنِ خطة إعادة الجدولة",
+    reschedNeedManage: "التطبيق يحتاج \"تعديل مواعيد النشر على YouTube\" (قسم الربط). تقدر تشوف الخطة بدونه.",
+    reschedNumbers: "مبنية على {n} فيديو سابق. آخر قراءة للأرقام {t}. حدّث التحليلات بالأعلى أولًا لو قديمة.",
+    reschedNoNumbers: "لم تُقرأ أي أرقام تحليلات بعد. حدّث التحليلات بالأعلى أولًا.",
+    "reschedWhy.not_enough_videos": "البيانات لا تكفي للحكم على أوقات النشر: عدد الفيديوهات السابقة التي لها أرقام {n} فقط، والمطلوب {m} على الأقل. لم يتغير شيء.",
+    "reschedWhy.not_enough_hours": "لا يوجد تنوع كافٍ: كل الفيديوهات نُشرت تقريبًا في نفس الساعة فلا يوجد ما نقارنه. لم يتغير شيء.",
+    "reschedWhy.no_clear_difference": "ساعات النشر أعطت نتائج متقاربة (أفضل ساعة أقل من {x} مرة من الباقي). تغيير المواعيد سيكون تخمينًا، فلم يتغير شيء.",
+    reschedBest: "أفضل الساعات حتى الآن (مشاهدات يوميًا، الوسيط): {h}.",
+    reschedNothing: "كل الفيديوهات المجدولة بالفعل في أفضل الساعات.",
+    reschedNoUpcoming: "لا يوجد شيء مجدول لتغييره.",
+    reschedSkipped: "تُرك {n} فيديو موعده قريب جدًا.",
+    reschedCapped: "تظهر أول {n} تغييرات فقط. شغّلها مرة أخرى بعد التطبيق.",
+    reschedOld: "الآن",
+    reschedNew: "الجديد",
+    reschedApply: "تأكيد: غيّر هذه المواعيد على YouTube",
+    reschedDone: "تم تغيير: {ok}. لم يتغير: {bad}.",
   },
 };
 
@@ -419,7 +507,7 @@ function connectionRow(kind, state) {
 function connectionsHtml(status) {
   const client = status.client_configured ? "" : ui.renderNotice(ui.esc(tr("connNeedClient")), "warning");
   const hint = `<p class="field-hint">${ui.esc(tr("pickChannelHint"))}</p><p class="field-hint" dir="ltr">${ui.esc(tr("connRedirect", { uri: status.redirect_uri }))}</p>`;
-  const rows = ["sheets", "analytics", "upload"].map((kind) => connectionRow(kind, status.kinds[kind])).join("");
+  const rows = ["sheets", "analytics", "upload", "manage"].map((kind) => connectionRow(kind, status.kinds[kind])).join("");
   return client + hint + rows;
 }
 
@@ -458,7 +546,7 @@ function reviewHtml(review) {
         weekday: "short",
         day: "numeric",
       });
-      return `<div class="pl-day ${day.count ? "has-items" : ""}"><span>${ui.esc(label)}</span><strong>${day.count}</strong></div>`;
+      return `<a class="pl-day ${day.count ? "has-items" : ""}" href="#/pipeline/day/${ui.attr(day.date)}" title="${ui.attr(tr("dayOpen"))}"><span>${ui.esc(label)}</span><strong>${day.count}</strong></a>`;
     })
     .join("");
   return `${tips}<h4 class="pl-sub">${ui.esc(tr("week"))}</h4><div class="pl-week">${days}</div>`;
@@ -584,6 +672,204 @@ function analyticsHtml(data) {
   return off + button + decisions + median + head + rows;
 }
 
+function hourLabel(hour) {
+  return `${String(hour).padStart(2, "0")}:00`;
+}
+
+function reschedPlanHtml(plan) {
+  let out = "";
+  if (!plan.analytics_authorised && !plan.numbers_read_at) {
+    out += ui.renderNotice(ui.esc(tr("reschedNoNumbers")), "warning");
+  }
+  if (plan.numbers_read_at) {
+    out += `<p class="field-hint">${ui.esc(tr("reschedNumbers", { n: plan.samples, t: ui.formatDateTimeLabel(plan.numbers_read_at) }))}</p>`;
+  }
+  if (plan.confidence !== "ok") {
+    const text = tr(`reschedWhy.${plan.reason}`, {
+      n: plan.samples,
+      m: plan.rules.min_videos,
+      x: plan.rules.min_lift,
+    });
+    return out + ui.renderNotice(ui.esc(text), "warning");
+  }
+  if (plan.hours.length) {
+    const hours = plan.hours.slice(0, 4).map((h) => `${hourLabel(h.hour)} (${h.median_rate})`).join(", ");
+    out += `<p class="field-hint">${ui.esc(tr("reschedBest", { h: hours }))}</p>`;
+  }
+  if (!plan.upcoming) return out + `<p class="field-hint">${ui.esc(tr("reschedNoUpcoming"))}</p>`;
+  if (plan.skipped_too_soon) out += `<p class="field-hint">${ui.esc(tr("reschedSkipped", { n: plan.skipped_too_soon }))}</p>`;
+  if (!plan.items.length) return out + `<p class="field-hint">${ui.esc(tr("reschedNothing"))}</p>`;
+  const head = `<div class="pl-row pl-head"><strong>${ui.esc(tr("colClip"))}</strong><strong>${ui.esc(tr("reschedOld"))}</strong><strong>${ui.esc(tr("reschedNew"))}</strong></div>`;
+  const rows = plan.items
+    .map(
+      (i) =>
+        `<div class="pl-row"><div class="pl-link">${ui.esc(i.title)}</div><span>${ui.esc(fmtWhen(i.old_publish_at))}</span><span class="pl-status is-state-scheduled">${ui.esc(fmtWhen(i.new_publish_at))}</span></div>`,
+    )
+    .join("");
+  const cap = plan.capped ? `<p class="field-hint">${ui.esc(tr("reschedCapped", { n: plan.items.length }))}</p>` : "";
+  const need = plan.manage_connected ? "" : ui.renderNotice(ui.esc(tr("reschedNeedManage")), "warning");
+  const data = ui.attr(JSON.stringify(plan.items.map((i) => ({ video_id: i.video_id, new_publish_at: i.new_publish_at }))));
+  return `${out}${head}${rows}${cap}${need}<div class="form-actions"><button class="button button-primary" type="button" id="pl-resched-run" data-items="${data}" ${plan.manage_connected ? "" : "disabled"}>${ui.esc(tr("reschedApply"))}</button></div>`;
+}
+
+function reschedSectionHtml() {
+  return `<section class="form-section" id="pl-resched-section">
+      <div class="form-section-header"><div><h3>${ui.esc(tr("resched"))}</h3><p>${ui.esc(tr("reschedHint"))}</p></div></div>
+      <div class="form-actions"><button class="button button-secondary" type="button" id="pl-resched-build" data-keep="1">${ui.esc(tr("reschedBuild"))}</button></div>
+      <div id="pl-resched-body" class="pl-queue"></div>
+    </section>`;
+}
+
+function toLocalInput(iso) {
+  const d = new Date(iso);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function shiftDay(day, delta) {
+  const d = new Date(`${day}T12:00:00`);
+  d.setDate(d.getDate() + delta);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function dayBodyHtml(data) {
+  const label = new Date(`${data.date}T12:00:00`).toLocaleDateString(getLocale(), {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+  const nav = `<div class="form-actions pl-daynav"><a class="button button-secondary button-small" href="#/pipeline">${ui.esc(tr("dayBack"))}</a>
+    <a class="button button-ghost button-small" href="#/pipeline/day/${ui.attr(shiftDay(data.date, -1))}">${ui.esc(tr("dayPrev"))}</a>
+    <a class="button button-ghost button-small" href="#/pipeline/day/${ui.attr(shiftDay(data.date, 1))}">${ui.esc(tr("dayNext"))}</a></div>`;
+  const past = data.is_past ? ui.renderNotice(ui.esc(tr("dayPast")), "info") : "";
+  const needManage = !data.manage_connected && data.videos.length && !data.is_past
+    ? ui.renderNotice(ui.esc(tr("dayNeedManage")), "warning")
+    : "";
+  const editable = data.manage_connected && !data.is_past;
+  const videos = data.videos.length
+    ? data.videos
+        .map((v) => {
+          const studio = v.studio_url ? ` <a href="${ui.attr(v.studio_url)}" target="_blank" rel="noopener noreferrer">${ui.esc(tr("dayOpenStudio"))}</a>` : "";
+          const edit = editable
+            ? `<div class="pl-actions"><input type="datetime-local" data-day-time="${ui.attr(v.video_id)}" value="${ui.attr(toLocalInput(v.publish_at))}" />
+               <button class="button button-primary button-small" type="button" data-day-move="${ui.attr(v.video_id)}" data-title="${ui.attr(v.title)}" data-old="${ui.attr(v.publish_at)}">${ui.esc(tr("dayMove"))}</button></div>`
+            : `<span></span>`;
+          return `<div class="pl-row"><div class="pl-link">${ui.esc(v.title)}${studio}</div><span class="pl-status is-state-scheduled">${ui.esc(fmtWhen(v.publish_at))}</span>${edit}</div>`;
+        })
+        .join("")
+    : `<p class="field-hint">${ui.esc(tr("dayNone"))}</p>`;
+  let add = "";
+  if (!data.is_past) {
+    const base = `${data.date}T${data.default_time}`;
+    if (!data.ready_clips.length) add = `<p class="field-hint">${ui.esc(tr("dayAddNone"))}</p>`;
+    else {
+      const options = data.ready_clips.map((c) => `<option value="${ui.attr(c.clip_id)}">${ui.esc(c.title)}</option>`).join("");
+      const ready = data.youtube_enabled && data.upload_authorised;
+      const warn = ready ? "" : ui.renderNotice(ui.esc(tr("dayNeedUpload")), "warning");
+      const unknown = data.schedule_known
+        ? ""
+        : ui.renderNotice(ui.esc(tr("planBlind")), "warning") +
+          `<div class="pl-check"><input type="checkbox" id="pl-day-allow-unknown" /><span>${ui.esc(tr("allowUnknown"))}</span></div>`;
+      add = `<p class="field-hint">${ui.esc(tr("dayAddHint"))}</p>${warn}${unknown}
+        <div class="pl-slot"><label>${ui.esc(tr("dayPickClip"))} <select id="pl-day-clip">${options}</select></label>
+        <label>${ui.esc(tr("dayTime"))} <input type="datetime-local" id="pl-day-new-time" value="${ui.attr(base)}" /></label>
+        <button class="button button-primary button-small" type="button" id="pl-day-add" ${ready ? "" : "disabled"}>${ui.esc(tr("dayAddBtn"))}</button></div>`;
+    }
+  }
+  return `${nav}<h1>${ui.esc(tr("dayTitle", { d: label }))}</h1>${past}
+    <section class="form-section"><div class="form-section-header"><div><h3>${ui.esc(tr("dayVideos"))}</h3></div></div>${needManage}<div class="pl-queue">${videos}</div></section>
+    ${data.is_past ? "" : `<section class="form-section"><div class="form-section-header"><div><h3>${ui.esc(tr("dayAdd"))}</h3></div></div>${add}</section>`}`;
+}
+
+export async function pipelineDayView(day, token, isCurrent = () => true) {
+  const channels = await call("/api/pipeline/channels");
+  if (!channels.channels.some((c) => c.id === channelId)) chooseChannel(channels.channels[0].id);
+  const data = await call(inChannel(`/api/pipeline/day?date=${encodeURIComponent(day)}`));
+  const html = `<div class="page-enter pl-page pl-daypage" id="pl-daypage">${dayBodyHtml(data)}</div>`;
+
+  function mount() {
+    const root = document.getElementById("pl-daypage");
+    if (!root) return;
+    const reload = async () => {
+      const fresh = await call(inChannel(`/api/pipeline/day?date=${encodeURIComponent(day)}`));
+      if (isCurrent()) root.innerHTML = dayBodyHtml(fresh);
+    };
+    const guard = async (button, work) => {
+      if (button.disabled) return;
+      button.disabled = true;
+      try {
+        await work();
+      } catch (error) {
+        ui.toast(error.message, "error");
+      } finally {
+        try {
+          await reload();
+        } catch {
+          button.disabled = false;
+        }
+      }
+    };
+    root.addEventListener("click", (event) => {
+      const button = event.target.closest("button");
+      if (!button) return;
+      if (button.dataset.dayMove) {
+        const id = button.dataset.dayMove;
+        const input = root.querySelector(`input[data-day-time="${CSS.escape(id)}"]`);
+        guard(button, async () => {
+          if (!input || !input.value) return;
+          const picked = new Date(input.value);
+          if (picked.getTime() < Date.now() + 30 * 60 * 1000) {
+            ui.toast(tr("dayTooSoon"), "error");
+            return;
+          }
+          const ok = await ui.confirmDialog(
+            tr("dayMoveAsk", { t: button.dataset.title, a: fmtWhen(button.dataset.old), b: fmtWhen(picked.toISOString()) }),
+            { title: tr("dayMoveTitle"), confirmLabel: tr("dayMove") },
+          );
+          if (!ok) return;
+          await call(inChannel(`/api/pipeline/day/video/${encodeURIComponent(id)}/time`), {
+            method: "PUT",
+            body: { publish_at: picked.toISOString(), confirm: true, channel_id: channelId },
+          });
+          ui.toast(tr("dayMoved"), "success");
+        });
+      } else if (button.id === "pl-day-add") {
+        guard(button, async () => {
+          const select = root.querySelector("#pl-day-clip");
+          const time = root.querySelector("#pl-day-new-time");
+          if (!select || !time || !time.value) return;
+          const picked = new Date(time.value);
+          if (picked.getTime() < Date.now() + 30 * 60 * 1000) {
+            ui.toast(tr("dayTooSoon"), "error");
+            return;
+          }
+          const title = select.options[select.selectedIndex].text;
+          const ok = await ui.confirmDialog(tr("dayAddAsk", { t: title, b: fmtWhen(picked.toISOString()) }), {
+            title: tr("dayAdd"),
+            confirmLabel: tr("dayAddBtn"),
+          });
+          if (!ok) return;
+          await call("/api/pipeline/day/add", {
+            method: "POST",
+            body: {
+              clip_id: select.value,
+              publish_at: picked.toISOString(),
+              confirm: true,
+              channel_id: channelId,
+              allow_unknown_schedule: root.querySelector("#pl-day-allow-unknown")?.checked === true,
+            },
+          });
+          ui.toast(tr("dayAdded"), "success");
+        });
+      }
+    });
+  }
+
+  return { title: tr("title"), html, mount };
+}
+
 export async function pipelineView(token, isCurrent = () => true) {
   const channels = await call("/api/pipeline/channels");
   if (!channels.channels.some((c) => c.id === channelId)) chooseChannel(channels.channels[0].id);
@@ -636,6 +922,7 @@ export async function pipelineView(token, isCurrent = () => true) {
       <div class="form-section-header"><div><h3>${ui.esc(tr("analytics"))}</h3><p>${ui.esc(tr("analyticsHint"))}</p></div></div>
       <div id="pl-analytics-body" class="pl-queue">${analyticsHtml(analytics)}</div>
     </section>
+    ${reschedSectionHtml()}
   </div>`;
 
   async function refresh(root) {
@@ -685,6 +972,7 @@ export async function pipelineView(token, isCurrent = () => true) {
       } finally {
         try {
           await refresh(root);
+          if (button.dataset.keep) button.disabled = false;
         } catch {
           button.disabled = false;
         }
@@ -807,6 +1095,24 @@ export async function pipelineView(token, isCurrent = () => true) {
           ui.toast(tr("runDone", { ok, bad: out.results.length - ok }), failed.length ? "error" : "success");
           if (failed.length) ui.toast(failed[0].error, "error");
           root.querySelector("#pl-plan-body").innerHTML = "";
+        });
+      } else if (button.id === "pl-resched-build") {
+        run(button, async () => {
+          const plan = await call(inChannel("/api/pipeline/reschedule/plan"));
+          root.querySelector("#pl-resched-body").innerHTML = reschedPlanHtml(plan);
+        });
+      } else if (button.id === "pl-resched-run") {
+        const items = JSON.parse(button.dataset.items || "[]");
+        run(button, async () => {
+          const out = await call("/api/pipeline/reschedule/apply", {
+            method: "POST",
+            body: { items, confirm: true, channel_id: channelId },
+          });
+          const ok = out.results.filter((r) => r.status === "changed").length;
+          const failed = out.results.filter((r) => r.status === "failed");
+          ui.toast(tr("reschedDone", { ok, bad: out.results.length - ok }), failed.length ? "error" : "success");
+          if (failed.length) ui.toast(failed[0].error, "error");
+          root.querySelector("#pl-resched-body").innerHTML = "";
         });
       } else if (button.id === "pl-analytics") {
         run(button, async () => {
