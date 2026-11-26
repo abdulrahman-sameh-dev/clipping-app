@@ -27,6 +27,7 @@ from clipping_ai.recovery import (
     StageStore,
     StartupReconciler,
 )
+from clipping_ai.pipeline.routes import register_pipeline_routes
 from clipping_ai.settings import get_settings
 from clipping_ai.skills.executor import SkillExecutor
 from clipping_ai.skills.registry import SkillRegistry
@@ -204,6 +205,7 @@ def create_app(
     start_clip_worker: bool | None = None,
     youtube_settings: YouTubeSettings | None = None,
     youtube_uploader: Any | None = None,
+    sheet_client: Any | None = None,
 ) -> FastAPI:
     settings = manager.settings if manager is not None else get_settings()
     video = video_service or VideoService(settings)
@@ -782,6 +784,12 @@ def create_app(
         settings=settings,
         youtube_settings=youtube_settings,
         uploader=youtube_uploader,
+    )
+    register_pipeline_routes(
+        app,
+        settings=settings,
+        uploads_path=(youtube_settings or YouTubeSettings()).uploads_path(settings.data_dir),
+        http_client=sheet_client,
     )
 
     frontend_dir = Path(__file__).resolve().parent.parent / "frontend"
