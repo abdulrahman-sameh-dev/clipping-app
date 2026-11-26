@@ -790,6 +790,8 @@ def create_app(
         settings=settings,
         uploads_path=(youtube_settings or YouTubeSettings()).uploads_path(settings.data_dir),
         http_client=sheet_client,
+        youtube_settings=youtube_settings,
+        youtube_uploader=youtube_uploader,
     )
 
     frontend_dir = Path(__file__).resolve().parent.parent / "frontend"
