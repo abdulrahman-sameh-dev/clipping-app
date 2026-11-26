@@ -34,6 +34,8 @@ from clipping_ai.trash import TrashService, TrashTarget
 from clipping_ai.video.models import JobStatus
 from clipping_ai.video.service import VideoService
 from clipping_ai.video.worker import VideoWorker
+from clipping_ai.youtube.config import YouTubeSettings
+from clipping_ai.youtube.routes import register_youtube_routes
 
 logger = logging.getLogger(__name__)
 
@@ -200,6 +202,8 @@ def create_app(
     clip_service: ClipService | None = None,
     start_worker: bool = True,
     start_clip_worker: bool | None = None,
+    youtube_settings: YouTubeSettings | None = None,
+    youtube_uploader: Any | None = None,
 ) -> FastAPI:
     settings = manager.settings if manager is not None else get_settings()
     video = video_service or VideoService(settings)
@@ -772,6 +776,13 @@ def create_app(
     def download_clip_job(request: Request, clip_id: str) -> FileResponse:
         path = _clips(request).output_path(clip_id)
         return FileResponse(path, media_type="video/mp4", filename=path.name)
+
+    register_youtube_routes(
+        app,
+        settings=settings,
+        youtube_settings=youtube_settings,
+        uploader=youtube_uploader,
+    )
 
     frontend_dir = Path(__file__).resolve().parent.parent / "frontend"
     if frontend_dir.is_dir():
