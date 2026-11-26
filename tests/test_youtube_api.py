@@ -77,6 +77,7 @@ def env(tmp_path):
 
     def build(*, authorised: bool = True, **settings):
         token = manager.settings.data_dir / "youtube" / "token.json"
+        token.unlink(missing_ok=True)
         if authorised:
             token.parent.mkdir(parents=True, exist_ok=True)
             token.write_text(
