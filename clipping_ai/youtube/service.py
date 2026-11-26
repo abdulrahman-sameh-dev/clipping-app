@@ -101,7 +101,9 @@ class YouTubeUploadService:
         request.validate_policy(now=now)
         return request
 
-    def upload(self, request: UploadRequest, *, force: bool = False) -> dict[str, Any]:
+    def upload(
+        self, request: UploadRequest, *, force: bool = False, channel_id: str | None = None
+    ) -> dict[str, Any]:
         """Upload the rendered file. Refuses repeats unless forced."""
         self.settings.require_enabled()
         if self.uploader is None:
@@ -137,5 +139,7 @@ class YouTubeUploadService:
             "uploaded_at": datetime.now(UTC).isoformat(),
             "studio_url": f"https://studio.youtube.com/video/{video_id}/edit",
         }
+        if channel_id:
+            record["channel_id"] = channel_id
         self.store.put(request.clip_id, record)
         return record
