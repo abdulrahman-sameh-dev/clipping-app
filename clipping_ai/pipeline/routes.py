@@ -23,6 +23,7 @@ from clipping_ai.pipeline import google, schedule
 from clipping_ai.pipeline.connect_routes import local_guard, register_connection_routes
 from clipping_ai.pipeline.insights import build_insights
 from clipping_ai.pipeline.plan import MAX_BATCH, plan_slots, publish_state
+from clipping_ai.pipeline.reschedule_routes import register_reschedule_routes
 from clipping_ai.pipeline.review import build_review
 from clipping_ai.pipeline.sheet import csv_export_url, fetch_rows
 from clipping_ai.pipeline.store import DEFAULT_CHANNEL, PipelineStore
@@ -282,6 +283,94 @@ def register_pipeline_routes(
             "weak_ratio": row.get("weak_ratio"),
             "authorised": google.is_authorised(settings.data_dir, "analytics", channel_id, yt),
         }
+
+    def upload_clip(
+        request: Request,
+        channel_id: str,
+        clip_id: str,
+        publish_at: datetime,
+        *,
+        allow_unknown_schedule: bool = False,
+    ) -> dict[str, Any]:
+        """Upload one ready clip as private with a release time the user chose. The caller has
+        already checked that the user confirmed it."""
+        yt.require_enabled()
+        yt.credentials()
+        token_path = google.token_path(settings.data_dir, "upload", channel_id, yt)
+        token = auth.load_token(token_path)
+        if not (token and token.get("refresh_token")):
+            raise AIError(
+                ErrorCategory.INVALID_REQUEST,
+                "YouTube upload is not connected for this channel yet. Use Connections on the "
+                "Pipeline page.",
+                provider="youtube",
+                retryable=False,
+            )
+        if not batch_lock.acquire(blocking=False):
+            raise AIError(
+                ErrorCategory.INVALID_REQUEST,
+                "Another upload or schedule change is in progress.",
+                retryable=False,
+            )
+        try:
+            refresh_schedule(channel_id, force=True)
+            known = schedule.is_known(
+                store, channel_id, datetime.now().astimezone(), schedule.RECENT
+            )
+            if not known and not allow_unknown_schedule:
+                raise AIError(
+                    ErrorCategory.INVALID_REQUEST,
+                    "The channel's own schedule could not be read, so this could collide with "
+                    "videos you scheduled yourself. Confirm that you want to continue without "
+                    "it. Nothing was uploaded.",
+                    provider="youtube",
+                    retryable=False,
+                )
+            service = YouTubeUploadService(
+                yt,
+                request.app.state.clips,
+                youtube_uploader or YouTubeClient(lambda: auth.get_access_token(yt, token_path)),
+                uploads,
+            )
+            upload_request = service.build_request(
+                clip_id, privacy=Privacy.PRIVATE, publish_at=publish_at
+            )
+            inflight = request.app.state.youtube_inflight
+            if not inflight.claim(clip_id):
+                raise AIError(
+                    ErrorCategory.INVALID_REQUEST,
+                    "This clip is already being uploaded.",
+                    retryable=False,
+                )
+            try:
+                record = service.upload(upload_request, force=False, channel_id=channel_id)
+            finally:
+                inflight.release(clip_id)
+            refresh_schedule(channel_id, force=True)
+            return {
+                "clip_id": clip_id,
+                "status": "scheduled",
+                "publish_at": record.get("publish_at"),
+                "studio_url": record.get("studio_url"),
+            }
+        finally:
+            batch_lock.release()
+
+    register_reschedule_routes(
+        app,
+        store=store,
+        uploads=uploads,
+        settings=settings,
+        yt=yt,
+        http_client=http_client,
+        chan=chan,
+        refresh_schedule=refresh_schedule,
+        channel_records=channel_records,
+        clip_rows=clip_rows,
+        plan_settings=plan_settings,
+        batch_lock=batch_lock,
+        upload_clip=upload_clip,
+    )
 
     register_connection_routes(
         app,
