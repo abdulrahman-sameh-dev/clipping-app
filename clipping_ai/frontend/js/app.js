@@ -3,7 +3,7 @@ import { getLocale, t, toggleLocale } from "./i18n.js";
 import { createPoller } from "./polling.js";
 import { createTrimEditor } from "./trim-editor.js";
 import * as ui from "./ui.js";
-import { pipelineText, pipelineView } from "./pipeline.js";
+import { pipelineDayView, pipelineText, pipelineView } from "./pipeline.js";
 import { mountYoutubePanel, youtubePanelHtml } from "./youtube.js";
 
 const main = document.getElementById("main");
@@ -148,6 +148,7 @@ function parseRoute() {
   const segments = pathPart.split("/").filter(Boolean);
   if (!segments.length) return { name: "dashboard", params };
   const [root, id, sub] = segments;
+  if (root === "pipeline" && id === "day" && sub) return { name: "pipeline", day: sub, params };
   if (root === "pipeline") return { name: "pipeline", params };
   if (root === "library") return { name: "library", params };
   if (root === "jobs") return { name: "jobs", params };
@@ -257,7 +258,9 @@ async function createView(route, token) {
     case "dashboard":
       return dashboardView(token);
     case "pipeline":
-      return pipelineView(token, () => token === state.token);
+      return route.day
+        ? pipelineDayView(route.day, token, () => token === state.token)
+        : pipelineView(token, () => token === state.token);
     case "library":
       return libraryView(token);
     case "analysis":
