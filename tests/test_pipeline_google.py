@@ -167,7 +167,7 @@ def env(tmp_path):
             )
         )
 
-    return TestClient(app), state, clips, uploader, video, sign_in, sign_in_youtube, data
+    return TestClient(app, base_url="http://127.0.0.1:8765"), state, clips, uploader, video, sign_in, sign_in_youtube, data
 
 
 def test_sheet_is_locked_until_login_or_explicit_public_allow(env):
@@ -286,17 +286,17 @@ def test_autopublish_needs_confirm_and_uploads_private_scheduled_once(env):
     assert c.post("/api/pipeline/autopublish/run", json={"clip_ids": ids}).status_code == 400
     assert uploader.requests == []
     assert (
-        c.post("/api/pipeline/autopublish/run", json={"clip_ids": ids, "confirm": True}).status_code
+        c.post("/api/pipeline/autopublish/run", json={"clip_ids": ids, "confirm": True, "allow_unknown_schedule": True}).status_code
         == 400
     )  # not signed in
     sign_in_youtube()
-    result = c.post("/api/pipeline/autopublish/run", json={"clip_ids": ids, "confirm": True}).json()
+    result = c.post("/api/pipeline/autopublish/run", json={"clip_ids": ids, "confirm": True, "allow_unknown_schedule": True}).json()
     assert [r["status"] for r in result["results"]] == ["scheduled", "scheduled"]
     assert all(r.privacy.value == "private" and r.publish_at is not None for r in uploader.requests)
     assert uploader.requests[0].publish_at < uploader.requests[1].publish_at
     states = {r["clip_id"]: r["state"] for r in c.get("/api/pipeline/clips").json()["clips"]}
     assert states[ids[0]] == "scheduled" and states[ids[1]] == "scheduled"
-    again = c.post("/api/pipeline/autopublish/run", json={"clip_ids": ids, "confirm": True}).json()
+    again = c.post("/api/pipeline/autopublish/run", json={"clip_ids": ids, "confirm": True, "allow_unknown_schedule": True}).json()
     assert [r["reason"] for r in again["results"]] == ["not_eligible", "not_eligible"]
     assert len(uploader.requests) == 2
     assert (
@@ -312,7 +312,7 @@ def test_autopublish_stops_after_quota_error(env):
     sign_in_youtube()
     ids = [i["clip_id"] for i in c.get("/api/pipeline/autopublish/plan").json()["items"]][:3]
     uploader.fail_at = 1
-    result = c.post("/api/pipeline/autopublish/run", json={"clip_ids": ids, "confirm": True}).json()
+    result = c.post("/api/pipeline/autopublish/run", json={"clip_ids": ids, "confirm": True, "allow_unknown_schedule": True}).json()
     assert [r["status"] for r in result["results"]] == ["scheduled", "failed", "skipped"]
 
 
