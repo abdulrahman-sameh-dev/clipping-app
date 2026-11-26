@@ -93,7 +93,7 @@ def client(tmp_path):
 
 def test_save_sync_and_dedupe(client):
     c, state, _ = client
-    assert c.put("/api/pipeline/source", json={"sheet_url": SHEET}).status_code == 200
+    assert c.put("/api/pipeline/source", json={"sheet_url": SHEET, "allow_public": True}).status_code == 200
     first = c.post("/api/pipeline/sync").json()
     assert first["added"] == 2 and first["counts"]["new"] == 2 and first["last_error"] is None
     assert c.post("/api/pipeline/sync").json()["added"] == 0
@@ -112,7 +112,7 @@ def test_rejects_foreign_host_and_missing_sheet(client):
 
 def test_private_sheet_gives_a_clear_error_and_is_remembered(client):
     c, state, _ = client
-    c.put("/api/pipeline/source", json={"sheet_url": SHEET})
+    c.put("/api/pipeline/source", json={"sheet_url": SHEET, "allow_public": True})
     state.update(type="text/html", body="<html>sign in</html>")
     response = c.post("/api/pipeline/sync")
     assert response.status_code == 400 and "Anyone with the link" in response.text
@@ -121,7 +121,7 @@ def test_private_sheet_gives_a_clear_error_and_is_remembered(client):
 
 def test_send_once_skip_and_restore(client):
     c, _, video = client
-    c.put("/api/pipeline/source", json={"sheet_url": SHEET})
+    c.put("/api/pipeline/source", json={"sheet_url": SHEET, "allow_public": True})
     c.post("/api/pipeline/sync")
     items = c.get("/api/pipeline/items").json()["items"]
     first, second = items[0]["id"], items[1]["id"]
@@ -137,7 +137,7 @@ def test_send_once_skip_and_restore(client):
 
 def test_review_endpoint_and_no_secrets(client):
     c, *_ = client
-    c.put("/api/pipeline/source", json={"sheet_url": SHEET})
+    c.put("/api/pipeline/source", json={"sheet_url": SHEET, "allow_public": True})
     c.post("/api/pipeline/sync")
     review = c.get("/api/pipeline/review")
     assert review.status_code == 200
