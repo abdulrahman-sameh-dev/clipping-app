@@ -3,8 +3,8 @@
 Rules (deliberately simple and explained in PIPELINE.md):
 - Only videos that are live and at least 2 days old are judged.
 - With fewer than 3 judged videos there is not enough data to compare.
-- Strong: views at least 1.5 x the median of the judged videos.
-- Weak: views at most 0.5 x the median.
+- Strong: views at least 1.5 x the median of the judged videos (per channel setting).
+- Weak: views at most 0.5 x the median (per channel setting).
 - Low retention: average watch time under 35% of the clip length (when the length is known).
 """
 
@@ -47,6 +47,8 @@ def build_insights(
     uploads: dict[str, dict[str, Any]],
     snapshots: list[dict[str, Any]],
     clip_info: dict[str, dict[str, Any]],
+    strong_ratio: float = STRONG,
+    weak_ratio: float = WEAK,
 ) -> dict[str, Any]:
     """`clip_info[clip_id]` may hold `title` and `duration`. Returns rows and decisions."""
     by_video = {s["video_id"]: s for s in snapshots}
@@ -93,9 +95,9 @@ def build_insights(
     else:
         base = float(median(r["views"] for r in judged))
         for r in judged:
-            if base > 0 and r["views"] >= STRONG * base:
+            if base > 0 and r["views"] >= strong_ratio * base:
                 r["verdict"] = "strong"
-            elif r["views"] <= WEAK * base:
+            elif r["views"] <= weak_ratio * base:
                 r["verdict"] = "weak"
             else:
                 r["verdict"] = "ok"
