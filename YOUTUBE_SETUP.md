@@ -99,6 +99,36 @@ Rules the module enforces before any request:
 - A clip already uploaded is refused unless you pass `--force`. Uploads are recorded in
   `data/youtube/uploads.json` (video id and time only, no credentials).
 
+## Upload from the web UI
+
+With the module enabled and authorised, open a clip in the studio (`/ui/`, clip detail page).
+The **YouTube** card shows the connection state and an **Upload to YouTube** form:
+
+- **Privacy** defaults to Private. Unlisted and Public are available.
+- **Schedule release** is only offered with Private. Pick a date and time; the UI adds your
+  UTC offset. The same rules as the CLI apply: at least 15 minutes ahead, at most a year.
+- **Public** asks for an explicit confirmation before anything is sent.
+- The button is disabled while an upload runs, the server refuses a second upload of the same
+  clip, and a clip already uploaded is shown with its Studio link instead of a form. The UI has
+  no "force" option; use `--force` on the CLI if you really need a repeat upload.
+- Errors from YouTube or from validation are shown on the card. Nothing on the page or in the
+  API responses contains a token, client id or client secret.
+
+The card cannot sign you in. Run `uv run clipping-ai youtube auth` on the computer that runs
+the app, then reload the page. The web UI never changes a clip's manual "published" flag.
+
+API routes behind the card:
+
+- `GET /api/youtube/status`: enabled, client configured, authorised, default privacy.
+- `GET /api/youtube/clips/{clip_id}`: the saved upload record and whether one is running.
+- `POST /api/youtube/clips/{clip_id}/upload`: body `privacy`, `publish_at`, `title`,
+  `description`, `confirm_public`.
+
+**Security note.** The local API has no authentication and is meant to listen on localhost
+only (`127.0.0.1`, the default of `clipping-ai serve`). Anyone who can reach it can upload clips
+to your channel with the saved token. Do not bind it to `0.0.0.0`, forward its port, or run it
+on a shared machine. Keep the module disabled when you do not need it.
+
 ## Troubleshooting
 
 - `YOUTUBE_CLIENT_ID and YOUTUBE_CLIENT_SECRET must be set`: add them to `.env`.
