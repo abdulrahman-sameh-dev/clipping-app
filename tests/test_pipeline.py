@@ -52,7 +52,7 @@ def test_review_flags_empty_days_and_ready_clips():
     )
     kinds = {t["kind"]: t["count"] for t in review["tips"]}
     assert kinds["new_links"] == 2 and kinds["ready_clips"] == 1 and kinds["failed_clips"] == 1
-    assert kinds["empty_days"] == 6
+    assert kinds["empty_days"] == 13
     assert sum(d["count"] for d in review["schedule"]) == 1
 
 
@@ -88,7 +88,7 @@ def client(tmp_path):
     )
     video = FakeVideo()
     app.state.video = video
-    return TestClient(app), state, video
+    return TestClient(app, base_url="http://127.0.0.1:8765"), state, video
 
 
 def test_save_sync_and_dedupe(client):
@@ -142,7 +142,7 @@ def test_review_endpoint_and_no_secrets(client):
     review = c.get("/api/pipeline/review")
     assert review.status_code == 200
     assert any(t["kind"] == "new_links" for t in review.json()["tips"])
-    assert len(review.json()["schedule"]) == 7
+    assert len(review.json()["schedule"]) == 14
 
 
 def test_pipeline_page_assets_are_served(client):
