@@ -111,13 +111,14 @@ https://myaccount.google.com/permissions.
 **Connect Google without the terminal.** The Pipeline page has a Connections section. Each row
 opens Google's consent page; Google sends the browser back to this local app
 (`http://127.0.0.1:PORT/api/google/callback`), which stores the token in `data/` (0600,
-git-ignored). Three separate sign-ins, each with the narrowest scope:
+git-ignored). Four separate sign-ins, each with the narrowest scope that does its job:
 
 | Sign-in | Scope | Per |
 | --- | --- | --- |
 | Google Sheets | `spreadsheets.readonly` | all channels |
 | YouTube Analytics and schedule | `yt-analytics.readonly` + `youtube.readonly` | channel |
-| YouTube upload | `youtube.upload` (the only one that can publish) | channel |
+| YouTube upload | `youtube.upload` (uploads new videos) | channel |
+| Edit scheduled times (optional) | `youtube.force-ssl` (can edit your videos; this app only changes the publish time of videos still waiting to go live) | channel |
 
 Disconnect deletes the token on this computer. To fully revoke, also remove the app in your
 Google account. The terminal commands (`pipeline auth sheets|analytics|upload --channel ID`)
@@ -153,3 +154,37 @@ sign-ins. A link belongs to one channel. A clip belongs to the channel of the li
 it (change it with `PUT /api/pipeline/clips/{id}/channel`), and once uploaded it stays with
 the channel it was uploaded to. The clip page's YouTube panel still uses the first channel.
 The first channel is the one that existed before: it keeps its sheet link, slot and tokens.
+
+## Day page and reschedule by analytics
+
+**Day page.** Click a day in "Next 14 days" (Daily review) to open `#/pipeline/day/YYYY-MM-DD`.
+It lists the videos scheduled that day (this tool's uploads and the ones read from YouTube) with
+a time field and a Move button, and lets you upload a ready clip privately for that day at a
+time you pick. Both ask for confirmation first. Moving a video needs the optional **Edit
+scheduled times** sign-in, because YouTube only lets the wider `youtube.force-ssl` scope change
+a video that already exists (`youtube.upload` cannot). Without it the page is read-only. A move
+only works on a video that is private with a future release time: a video that already went
+public is refused, so this can never publish or hide anything. The update sends the other
+status fields back unchanged. Minimum 30 minutes ahead, at most a year. Cost: about 50 quota
+units per change.
+
+**Reschedule by analytics.** The button "Build reschedule plan" never changes anything. It shows
+old and new time for each scheduled video and a confirm button. Rules:
+
+- Evidence: videos this tool uploaded that went public at least 2 days ago and whose numbers
+  were read ("Refresh analytics" first). Score = views per day live (at most 28 days), so older
+  videos do not win just for being older. Videos are grouped by publish hour (local time).
+- A new time is proposed only with at least 6 scored videos, at least 2 hours with 2 or more
+  videos each, and a best hour that beats the median of the others by 1.25 times. Otherwise the
+  plan changes nothing and says which rule failed. Thin data is a normal answer.
+- Only the time of day moves; each video stays on its day. The earliest video of a day gets the
+  best hour, the next one the second best, and so on. A video due within 30 minutes is left
+  alone. At most 20 changes per run.
+- Apply recomputes the plan on the server and only changes the items that still match it
+  exactly; anything else is skipped as "plan changed". It stops after a quota or permission
+  error.
+
+Limits: hours are compared by correlation on a small sample, not proof. Views also depend on
+the clip, not only the time. Videos scheduled in YouTube Studio are moved too but have no
+numbers of their own here, so they are never used as evidence. Not tested against the real
+YouTube API (mocked tests only): first real check is to move one video on the day page.
