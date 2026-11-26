@@ -19,12 +19,13 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from clipping_ai.clips.models import ClipStatus
 from clipping_ai.errors import AIError, ErrorCategory
-from clipping_ai.pipeline import google
+from clipping_ai.pipeline import google, schedule
+from clipping_ai.pipeline.connect_routes import local_guard, register_connection_routes
 from clipping_ai.pipeline.insights import build_insights
 from clipping_ai.pipeline.plan import MAX_BATCH, plan_slots, publish_state
 from clipping_ai.pipeline.review import build_review
 from clipping_ai.pipeline.sheet import csv_export_url, fetch_rows
-from clipping_ai.pipeline.store import PipelineStore
+from clipping_ai.pipeline.store import DEFAULT_CHANNEL, PipelineStore
 from clipping_ai.settings import Settings
 from clipping_ai.youtube import auth
 from clipping_ai.youtube.client import YouTubeClient
@@ -59,6 +60,10 @@ class AutoPublishBody(BaseModel):
 
     clip_ids: list[str] = Field(min_length=1, max_length=MAX_BATCH)
     confirm: bool = False
+    channel_id: str | None = None
+    # Upload even though the channel's own schedule could not be read just now. The plan may
+    # then collide with videos scheduled in YouTube Studio, so the UI asks for it explicitly.
+    allow_unknown_schedule: bool = False
 
 
 class ExcludeBody(BaseModel):
@@ -87,31 +92,55 @@ def register_pipeline_routes(
     batch_lock = threading.Lock()
     refresh_state = {"last": 0.0}
 
-    def token_provider(kind: str):
-        path = google.token_path(settings.data_dir, kind)
+    def chan(channel: str | None) -> str:
+        channel_id = channel or DEFAULT_CHANNEL
+        if store.get_channel(channel_id) is None:
+            raise AIError(ErrorCategory.NOT_FOUND, "Channel not found.", retryable=False)
+        return channel_id
+
+    def token_provider(kind: str, channel_id: str = DEFAULT_CHANNEL):
+        path = google.token_path(settings.data_dir, kind, channel_id, yt)
         return lambda: auth.get_access_token(yt, path, http=http_client)
 
-    def plan_settings() -> dict[str, int]:
+    def refresh_schedule(channel_id: str, *, force: bool = False) -> str | None:
+        return schedule.refresh(
+            store,
+            settings.data_dir,
+            yt,
+            channel_id,
+            now=datetime.now().astimezone(),
+            http=http_client,
+            force=force,
+        )
+
+    def plan_settings(channel_id: str) -> dict[str, int]:
+        row = store.get_channel(channel_id) or {}
         return {
-            "publish_hour": int(store.get_setting("publish_hour")),
-            "publish_minute": int(store.get_setting("publish_minute")),
-            "per_day": int(store.get_setting("per_day")),
+            "publish_hour": int(row.get("publish_hour", 18)),
+            "publish_minute": int(row.get("publish_minute", 0)),
+            "per_day": int(row.get("per_day", 1)),
         }
 
-    def source_view() -> dict[str, Any]:
+    def source_view(channel_id: str) -> dict[str, Any]:
         sheets = google.is_authorised(settings.data_dir, "sheets")
         allow = store.get_setting("allow_public_sheet") == "1"
+        row = store.get_channel(channel_id) or {}
         return {
-            **store.source(),
-            "counts": store.counts(),
+            **store.source(channel_id),
+            "channel_id": channel_id,
+            "channel_name": row.get("name"),
+            "counts": store.counts(channel_id),
             "access": "login" if sheets else ("public_link" if allow else "locked"),
             "sheets_authorised": sheets,
-            "analytics_authorised": google.is_authorised(settings.data_dir, "analytics"),
+            "analytics_authorised": google.is_authorised(
+                settings.data_dir, "analytics", channel_id, yt
+            ),
+            "upload_authorised": google.is_authorised(settings.data_dir, "upload", channel_id, yt),
             "allow_public": allow,
-            "plan_settings": plan_settings(),
+            "plan_settings": plan_settings(channel_id),
         }
 
-    def sync(sheet_url: str) -> tuple[int, int]:
+    def sync(sheet_url: str, channel_id: str) -> tuple[int, int]:
         try:
             if google.is_authorised(settings.data_dir, "sheets"):
                 rows = google.fetch_private_rows(
@@ -122,30 +151,48 @@ def register_pipeline_routes(
             else:
                 raise AIError(
                     ErrorCategory.INVALID_REQUEST,
-                    "Sheet access is locked. Sign in with Google (read-only) by running "
-                    "`uv run clipping-ai pipeline auth sheets` on this computer. See PIPELINE.md.",
+                    "Sheet access is locked. Sign in with Google (read-only) under Connections on this "
+                    "page, or run `uv run clipping-ai pipeline auth sheets` on this computer. "
+                    "See PIPELINE.md.",
                     provider="sheet",
                     retryable=False,
                 )
         except AIError as exc:
-            store.record_sync(exc.message if hasattr(exc, "message") else str(exc))
+            store.record_sync(exc.message if hasattr(exc, "message") else str(exc), channel_id)
             raise
-        added, duplicates = store.add_rows_detailed(rows)
-        store.record_sync(None)
+        added, duplicates = store.add_rows_detailed(rows, channel_id)
+        store.record_sync(None, channel_id)
         return added, duplicates
 
-    def clip_rows(request: Request) -> list[dict[str, Any]]:
+    def clip_channel_map(clips: Any, rows_clips: list[Any]) -> dict[str, str]:
+        jobs = store.job_channels()
+        overrides = store.clip_channel_overrides()
+        known = {c["id"] for c in store.list_channels()}
+        out: dict[str, str] = {}
+        for clip in rows_clips:
+            chosen = overrides.get(clip.id) or jobs.get(getattr(clip, "source_job_id", ""), "")
+            out[clip.id] = chosen if chosen in known else DEFAULT_CHANNEL
+        return out
+
+    def clip_rows(request: Request, channel_id: str | None = None) -> list[dict[str, Any]]:
         clips = request.app.state.clips
         now = datetime.now().astimezone()
         records = uploads.load()
         excluded = store.excluded_clips()
+        ready = clips.list(status=ClipStatus.READY, limit=500)
+        owner = clip_channel_map(clips, ready)
         rows: list[dict[str, Any]] = []
-        for clip in clips.list(status=ClipStatus.READY, limit=500):
+        for clip in ready:
+            # A clip that was uploaded belongs to the channel it was uploaded to.
             record = records.get(clip.id)
+            clip_channel = schedule.record_channel(record) if record else owner[clip.id]
+            if channel_id is not None and clip_channel != channel_id:
+                continue
             studio = (record or {}).get("studio_url")
             rows.append(
                 {
                     "clip_id": clip.id,
+                    "channel_id": clip_channel,
                     "title": clips.display_title(clip),
                     "duration": clip.duration,
                     "created_at": clip.created_at,
@@ -159,18 +206,26 @@ def register_pipeline_routes(
             )
         return rows
 
-    def build_plan(request: Request, only: list[str] | None = None) -> dict[str, Any]:
+    def build_plan(
+        request: Request, channel_id: str, only: list[str] | None = None
+    ) -> dict[str, Any]:
         now = datetime.now().astimezone()
-        cfg = plan_settings()
-        rows = [r for r in clip_rows(request) if r["state"] == "not_uploaded" and not r["excluded"]]
+        refresh_schedule(channel_id)
+        cfg = plan_settings(channel_id)
+        rows = [
+            r
+            for r in clip_rows(request, channel_id)
+            if r["state"] == "not_uploaded" and not r["excluded"]
+        ]
         rows.sort(key=lambda r: r["created_at"])
         if only is not None:
             rows = [r for r in rows if r["clip_id"] in only]
         total = len(rows)
         rows = rows[:MAX_BATCH]
+        busy = schedule.merged_uploads(store, uploads.load(), channel_id)
         slots = plan_slots(
             now=now,
-            uploads=uploads.load(),
+            uploads=busy,
             count=len(rows),
             hour=cfg["publish_hour"],
             minute=cfg["publish_minute"],
@@ -180,23 +235,31 @@ def register_pipeline_routes(
             {"clip_id": r["clip_id"], "title": r["title"], "publish_at": slot.isoformat()}
             for r, slot in zip(rows, slots, strict=False)
         ]
+        row = store.get_channel(channel_id) or {}
         return {
             "items": items,
+            "channel_id": channel_id,
+            "channel_name": row.get("name"),
             "eligible_total": total,
             "capped": total > MAX_BATCH,
             "max_batch": MAX_BATCH,
             "settings": cfg,
             "youtube_enabled": yt.enabled,
-            "youtube_authorised": bool(
-                (auth.load_token(yt.resolved_token_path(settings.data_dir)) or {}).get(
-                    "refresh_token"
-                )
-            ),
+            "youtube_authorised": google.is_authorised(settings.data_dir, "upload", channel_id, yt),
+            "schedule_known": schedule.is_known(store, channel_id, now, schedule.KNOWN_FOR),
+            "schedule_can_read": google.can_read_schedule(settings.data_dir, channel_id, yt),
+            "scheduled_on_channel": len(store.remote_schedule(channel_id)),
         }
 
-    def insights_view(request: Request) -> dict[str, Any]:
+    def channel_records(channel_id: str) -> dict[str, dict[str, Any]]:
+        return {
+            cid: r for cid, r in uploads.load().items() if schedule.record_channel(r) == channel_id
+        }
+
+    def insights_view(request: Request, channel_id: str) -> dict[str, Any]:
         clips = request.app.state.clips
-        records = uploads.load()
+        records = channel_records(channel_id)
+        row = store.get_channel(channel_id) or {}
         info: dict[str, dict[str, Any]] = {}
         for clip_id in records:
             try:
@@ -209,43 +272,70 @@ def register_pipeline_routes(
             uploads=records,
             snapshots=store.analytics(),
             clip_info=info,
+            strong_ratio=float(row.get("strong_ratio", 1.5)),
+            weak_ratio=float(row.get("weak_ratio", 0.5)),
         )
-        return {**result, "authorised": google.is_authorised(settings.data_dir, "analytics")}
+        return {
+            **result,
+            "channel_id": channel_id,
+            "strong_ratio": row.get("strong_ratio"),
+            "weak_ratio": row.get("weak_ratio"),
+            "authorised": google.is_authorised(settings.data_dir, "analytics", channel_id, yt),
+        }
+
+    register_connection_routes(
+        app,
+        store=store,
+        data_dir=settings.data_dir,
+        yt=yt,
+        http_client=http_client,
+        chan=chan,
+        refresh_schedule=refresh_schedule,
+    )
 
     @app.get("/api/pipeline/source")
-    def pipeline_source() -> dict[str, Any]:
-        return source_view()
+    def pipeline_source(channel: str | None = None) -> dict[str, Any]:
+        return source_view(chan(channel))
 
     @app.put("/api/pipeline/source")
-    def pipeline_set_source(body: SheetBody) -> dict[str, Any]:
+    def pipeline_set_source(body: SheetBody, channel: str | None = None) -> dict[str, Any]:
+        cid = chan(channel)
         csv_export_url(body.sheet_url)  # validates host and shape
-        store.set_sheet_url(body.sheet_url.strip())
+        store.set_sheet_url(body.sheet_url.strip(), cid)
         if body.allow_public is not None:
             store.set_setting("allow_public_sheet", "1" if body.allow_public else "0")
-        return source_view()
+        return source_view(cid)
 
     @app.put("/api/pipeline/settings")
-    def pipeline_settings(body: PlanSettingsBody) -> dict[str, Any]:
-        store.set_setting("publish_hour", str(body.publish_hour))
-        store.set_setting("publish_minute", str(body.publish_minute))
-        store.set_setting("per_day", str(body.per_day))
-        return source_view()
+    def pipeline_settings(body: PlanSettingsBody, channel: str | None = None) -> dict[str, Any]:
+        cid = chan(channel)
+        store.update_channel(
+            cid,
+            {
+                "publish_hour": body.publish_hour,
+                "publish_minute": body.publish_minute,
+                "per_day": body.per_day,
+            },
+        )
+        return source_view(cid)
 
     @app.post("/api/pipeline/sync")
-    def pipeline_sync() -> dict[str, Any]:
-        sheet_url = store.source()["sheet_url"]
+    def pipeline_sync(channel: str | None = None) -> dict[str, Any]:
+        cid = chan(channel)
+        sheet_url = store.source(cid)["sheet_url"]
         if not sheet_url:
             raise AIError(
                 ErrorCategory.INVALID_REQUEST,
                 "Save a Google Sheet link first.",
                 retryable=False,
             )
-        added, duplicates = sync(sheet_url)
-        return {"added": added, "duplicates": duplicates, **source_view()}
+        added, duplicates = sync(sheet_url, cid)
+        return {"added": added, "duplicates": duplicates, **source_view(cid)}
 
     @app.get("/api/pipeline/items")
-    def pipeline_items() -> dict[str, Any]:
-        return {"items": store.list_items(), "counts": store.counts()}
+    def pipeline_items(channel: str | None = None) -> dict[str, Any]:
+        cid = chan(channel)
+        return {"items": store.list_items(channel_id=cid), "counts": store.counts(cid)}
 
     @app.post("/api/pipeline/items/{item_id}/send")
     def pipeline_send(request: Request, item_id: int) -> dict[str, Any]:
@@ -296,29 +386,31 @@ def register_pipeline_routes(
         return {"item": store.get(item_id)}
 
     @app.get("/api/pipeline/review")
-    def pipeline_review(request: Request) -> dict[str, Any]:
+    def pipeline_review(request: Request, channel: str | None = None) -> dict[str, Any]:
+        cid = chan(channel)
         clips = request.app.state.clips
+        now = datetime.now().astimezone()
+        refresh_schedule(cid)
         ready: list[str] = []
         failed = 0
         try:
-            ready = [
-                c.id for c in clips.list(status=ClipStatus.READY, limit=500) if not c.published
-            ]
+            ready = [r["clip_id"] for r in clip_rows(request, cid) if r["state"] != "manual"]
             failed = len(clips.list(status=ClipStatus.FAILED, limit=500))
         except (AttributeError, TypeError):
             pass
         return build_review(
-            now=datetime.now().astimezone(),
-            source=store.source(),
-            counts=store.counts(),
-            uploads=uploads.load(),
+            now=now,
+            source=store.source(cid),
+            counts=store.counts(cid),
+            uploads=schedule.merged_uploads(store, uploads.load(), cid),
             ready_clip_ids=ready,
             failed_clips=failed,
+            schedule_known=schedule.is_known(store, cid, now, schedule.KNOWN_FOR),
         )
 
     @app.get("/api/pipeline/clips")
-    def pipeline_clips(request: Request) -> dict[str, Any]:
-        return {"clips": clip_rows(request)}
+    def pipeline_clips(request: Request, channel: str | None = None) -> dict[str, Any]:
+        return {"clips": clip_rows(request, chan(channel)), "channel_id": chan(channel)}
 
     @app.put("/api/pipeline/clips/{clip_id}/exclude")
     def pipeline_exclude(request: Request, clip_id: str, body: ExcludeBody) -> dict[str, Any]:
@@ -327,11 +419,13 @@ def register_pipeline_routes(
         return {"clip_id": clip_id, "excluded": body.excluded}
 
     @app.get("/api/pipeline/autopublish/plan")
-    def pipeline_autopublish_plan(request: Request) -> dict[str, Any]:
-        return build_plan(request)
+    def pipeline_autopublish_plan(request: Request, channel: str | None = None) -> dict[str, Any]:
+        return build_plan(request, chan(channel))
 
     @app.post("/api/pipeline/autopublish/run")
     def pipeline_autopublish_run(request: Request, body: AutoPublishBody) -> dict[str, Any]:
+        local_guard(request)
+        cid = chan(body.channel_id)
         if not body.confirm:
             raise AIError(
                 ErrorCategory.INVALID_REQUEST,
@@ -340,11 +434,13 @@ def register_pipeline_routes(
             )
         yt.require_enabled()
         yt.credentials()
-        token = auth.load_token(yt.resolved_token_path(settings.data_dir))
+        token_path = google.token_path(settings.data_dir, "upload", cid, yt)
+        token = auth.load_token(token_path)
         if not (token and token.get("refresh_token")):
             raise AIError(
                 ErrorCategory.INVALID_REQUEST,
-                "YouTube is not authorised yet. Run `uv run clipping-ai youtube auth` first.",
+                "YouTube upload is not connected for this channel yet. Use Connections on the "
+                "Pipeline page.",
                 provider="youtube",
                 retryable=False,
             )
@@ -355,10 +451,23 @@ def register_pipeline_routes(
                 retryable=False,
             )
         try:
-            plan = build_plan(request, only=body.clip_ids)
+            # Read the channel's schedule again right before planning, so videos added in
+            # YouTube Studio a minute ago are respected.
+            refresh_schedule(cid, force=True)
+            known = schedule.is_known(store, cid, datetime.now().astimezone(), schedule.RECENT)
+            if not known and not body.allow_unknown_schedule:
+                raise AIError(
+                    ErrorCategory.INVALID_REQUEST,
+                    "The channel's own schedule could not be read, so the plan could collide "
+                    "with videos you scheduled yourself. Connect YouTube read access "
+                    "(Connections) or confirm that you want to continue without it. Nothing "
+                    "was uploaded.",
+                    provider="youtube",
+                    retryable=False,
+                )
+            plan = build_plan(request, cid, only=body.clip_ids)
             planned = {item["clip_id"]: item for item in plan["items"]}
             inflight = request.app.state.youtube_inflight
-            token_path = yt.resolved_token_path(settings.data_dir)
             service = YouTubeUploadService(
                 yt,
                 request.app.state.clips,
@@ -388,7 +497,7 @@ def register_pipeline_routes(
                         )
                         continue
                     try:
-                        record = service.upload(upload_request, force=False)
+                        record = service.upload(upload_request, force=False, channel_id=cid)
                     finally:
                         inflight.release(clip_id)
                     results.append(
@@ -403,21 +512,22 @@ def register_pipeline_routes(
                     results.append({"clip_id": clip_id, "status": "failed", "error": exc.message})
                     if exc.category in _STOP_CATEGORIES:
                         stop = True
-            return {"results": results}
+            return {"results": results, "channel_id": cid}
         finally:
             batch_lock.release()
 
     @app.get("/api/pipeline/analytics")
-    def pipeline_analytics(request: Request) -> dict[str, Any]:
-        return insights_view(request)
+    def pipeline_analytics(request: Request, channel: str | None = None) -> dict[str, Any]:
+        return insights_view(request, chan(channel))
 
     @app.post("/api/pipeline/analytics/refresh")
-    def pipeline_analytics_refresh(request: Request) -> dict[str, Any]:
-        if not google.is_authorised(settings.data_dir, "analytics"):
+    def pipeline_analytics_refresh(request: Request, channel: str | None = None) -> dict[str, Any]:
+        cid = chan(channel)
+        if not google.is_authorised(settings.data_dir, "analytics", cid, yt):
             raise AIError(
                 ErrorCategory.INVALID_REQUEST,
-                "Analytics is not connected. Run `uv run clipping-ai pipeline auth analytics` "
-                "on this computer (read-only sign-in). See PIPELINE.md.",
+                "Analytics is not connected for this channel. Use Connections on this page, or run "
+                "`uv run clipping-ai pipeline auth analytics` on this computer (read-only).",
                 provider="google",
                 retryable=False,
             )
@@ -429,12 +539,12 @@ def register_pipeline_routes(
                 provider="google",
                 retryable=True,
             )
-        records = uploads.load()
-        by_video = {r["video_id"]: cid for cid, r in records.items() if r.get("video_id")}
+        records = channel_records(cid)
+        by_video = {r["video_id"]: clip for clip, r in records.items() if r.get("video_id")}
         today = datetime.now().astimezone().date()
         rows = google.fetch_video_analytics(
             list(by_video),
-            token_provider("analytics"),
+            token_provider("analytics", cid),
             start=today - timedelta(days=ANALYTICS_DAYS),
             end=today,
             http=http_client,
@@ -459,4 +569,4 @@ def register_pipeline_routes(
         for row in rows:
             row["clip_id"] = by_video.get(row["video_id"])
         store.save_analytics(rows)
-        return insights_view(request)
+        return insights_view(request, cid)
