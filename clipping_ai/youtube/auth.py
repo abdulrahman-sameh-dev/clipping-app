@@ -237,5 +237,7 @@ def get_access_token(
         if owns:
             client.close()
     updated = _token_record(payload, previous_refresh=str(refresh))
+    if "scope" not in payload and record.get("scope"):
+        updated["scope"] = record["scope"]  # keep the scopes that were granted
     save_token(token_path, updated)
     return str(updated["access_token"])
