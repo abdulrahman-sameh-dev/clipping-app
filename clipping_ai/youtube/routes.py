@@ -117,9 +117,7 @@ def register_youtube_routes(
         }
 
     @app.post("/api/youtube/clips/{clip_id}/upload")
-    def youtube_upload(
-        request: Request, clip_id: str, body: YouTubeUploadBody
-    ) -> dict[str, Any]:
+    def youtube_upload(request: Request, clip_id: str, body: YouTubeUploadBody) -> dict[str, Any]:
         yt.require_enabled()
         yt.credentials()
         if not is_authorised():
