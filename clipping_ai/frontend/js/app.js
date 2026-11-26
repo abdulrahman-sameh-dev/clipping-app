@@ -3,6 +3,7 @@ import { getLocale, t, toggleLocale } from "./i18n.js";
 import { createPoller } from "./polling.js";
 import { createTrimEditor } from "./trim-editor.js";
 import * as ui from "./ui.js";
+import { mountYoutubePanel, youtubePanelHtml } from "./youtube.js";
 
 const main = document.getElementById("main");
 const sidebar = document.getElementById("sidebar");
@@ -2516,6 +2517,7 @@ async function clipDetailView(route, token) {
           </label>
           <p class="field-hint">${ui.esc(t("clips.manualPublishOnly"))}</p>
         </section>
+        ${ready ? youtubePanelHtml(clip) : ""}
         <section class="form-section">
           <div class="form-section-header">
             <div><h3>${ui.esc(t("clips.sourceJob"))}</h3><p>${ui.esc(t("clips.sourceJobHint"))}</p></div>
@@ -2636,6 +2638,7 @@ async function clipDetailView(route, token) {
           showFeedback(error.message || t("common.error"), "error");
         }
       });
+      if (ready) mountYoutubePanel(main, clip);
       main.querySelector("#clip-published")?.addEventListener("change", async (event) => {
         const checkbox = event.currentTarget;
         try {
