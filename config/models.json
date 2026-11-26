@@ -20,8 +20,12 @@
       "verification_source": "https://ai.google.dev/gemini-api/docs/pricing",
       "context_window": 1000000,
       "max_output_tokens": 8192,
-      "input_modalities": ["text"],
-      "output_modalities": ["text"],
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
       "supports_json": true,
       "status": "enabled",
       "notes": "Listed as 'Free of charge' on the Gemini API pricing page. Re-verify periodically."
@@ -45,8 +49,12 @@
       "verification_source": "https://ai.google.dev/gemini-api/docs/pricing",
       "context_window": 1000000,
       "max_output_tokens": 8192,
-      "input_modalities": ["text"],
-      "output_modalities": ["text"],
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
       "supports_json": true,
       "status": "enabled",
       "notes": "Listed as 'Free of charge' on the Gemini API pricing page. Re-verify periodically."
@@ -70,8 +78,12 @@
       "verification_source": "https://ai.google.dev/gemini-api/docs/pricing",
       "context_window": 1000000,
       "max_output_tokens": 8192,
-      "input_modalities": ["text"],
-      "output_modalities": ["text"],
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
       "supports_json": true,
       "status": "enabled",
       "notes": "Listed as 'Free of charge' on the Gemini API pricing page. Re-verify periodically."
@@ -95,8 +107,12 @@
       "verification_source": "https://console.groq.com/docs/rate-limits",
       "context_window": 131072,
       "max_output_tokens": 8192,
-      "input_modalities": ["text"],
-      "output_modalities": ["text"],
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
       "supports_json": true,
       "daily_request_limit": 1000,
       "status": "enabled",
@@ -121,8 +137,12 @@
       "verification_source": "https://console.groq.com/docs/rate-limits",
       "context_window": 131072,
       "max_output_tokens": 8192,
-      "input_modalities": ["text"],
-      "output_modalities": ["text"],
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
       "supports_json": true,
       "daily_request_limit": 1000,
       "status": "enabled",
@@ -147,8 +167,12 @@
       "verification_source": "https://console.groq.com/docs/rate-limits",
       "context_window": 131072,
       "max_output_tokens": 8192,
-      "input_modalities": ["text"],
-      "output_modalities": ["text"],
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
       "supports_json": true,
       "daily_request_limit": 1000,
       "status": "enabled",
@@ -173,8 +197,12 @@
       "verification_source": "manual approval",
       "context_window": null,
       "max_output_tokens": null,
-      "input_modalities": ["text"],
-      "output_modalities": ["text"],
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
       "supports_json": true,
       "status": "enabled",
       "notes": "OpenRouter free routing alias. Manually approved by this config but not verified against pricing metadata. Run the verify command or confirm in your OpenRouter dashboard before relying on it."
@@ -198,8 +226,12 @@
       "verification_source": null,
       "context_window": null,
       "max_output_tokens": null,
-      "input_modalities": ["text"],
-      "output_modalities": ["text"],
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
       "supports_json": true,
       "status": "disabled",
       "notes": "EXAMPLE ONLY. Replace with a current OpenRouter :free model ID, verify its pricing, then set free=true and status=enabled."
@@ -208,15 +240,21 @@
       "id": "groq-whisper-turbo",
       "provider": "groq_speech",
       "provider_model_id": "whisper-large-v3-turbo",
-      "tasks": ["speech_to_text"],
+      "tasks": [
+        "speech_to_text"
+      ],
       "free": true,
       "free_verified": true,
       "verified_at": "2026-11-09",
       "verification_source": "https://console.groq.com/docs/rate-limits",
       "context_window": null,
       "max_output_tokens": null,
-      "input_modalities": ["audio"],
-      "output_modalities": ["text"],
+      "input_modalities": [
+        "audio"
+      ],
+      "output_modalities": [
+        "text"
+      ],
       "supports_json": true,
       "supports_word_timestamps": true,
       "daily_request_limit": 2000,
@@ -227,15 +265,21 @@
       "id": "groq-whisper-v3",
       "provider": "groq_speech",
       "provider_model_id": "whisper-large-v3",
-      "tasks": ["speech_to_text"],
+      "tasks": [
+        "speech_to_text"
+      ],
       "free": true,
       "free_verified": true,
       "verified_at": "2026-11-09",
       "verification_source": "https://console.groq.com/docs/rate-limits",
       "context_window": null,
       "max_output_tokens": null,
-      "input_modalities": ["audio"],
-      "output_modalities": ["text"],
+      "input_modalities": [
+        "audio"
+      ],
+      "output_modalities": [
+        "text"
+      ],
       "supports_json": true,
       "supports_word_timestamps": true,
       "daily_request_limit": 2000,
@@ -246,15 +290,21 @@
       "id": "local-whisper",
       "provider": "whisper_cpp",
       "provider_model_id": "local",
-      "tasks": ["speech_to_text"],
+      "tasks": [
+        "speech_to_text"
+      ],
       "free": true,
       "free_verified": true,
       "verified_at": "2026-11-09",
       "verification_source": "local CPU compute (no API cost)",
       "context_window": null,
       "max_output_tokens": null,
-      "input_modalities": ["audio"],
-      "output_modalities": ["text"],
+      "input_modalities": [
+        "audio"
+      ],
+      "output_modalities": [
+        "text"
+      ],
       "supports_json": true,
       "supports_word_timestamps": true,
       "status": "enabled",

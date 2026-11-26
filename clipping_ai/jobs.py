@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
+from clipping_ai.recovery.schema import migrate_jobs_db
 from clipping_ai.schemas import TranscriptResult
 
 _SCHEMA = """
@@ -35,6 +36,7 @@ class TranscriptionCache:
         self._lock = threading.Lock()
         with self._session() as conn:
             conn.executescript(_SCHEMA)
+        migrate_jobs_db(self.db_path)
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, timeout=10)

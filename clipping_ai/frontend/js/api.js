@@ -114,17 +114,26 @@ function uploadVideo(file, onProgress) {
   });
 }
 
-function get(path, params) {
-  return request(pathWithQuery(path, params));
+function get(path, params, options) {
+  return request(pathWithQuery(path, params), options);
 }
 
 function post(path, body) {
   return request(path, { method: "POST", body });
 }
 
+function patch(path, body) {
+  return request(path, { method: "PATCH", body });
+}
+
+function del(path, body) {
+  return request(path, { method: "DELETE", body });
+}
+
 export const api = {
   health: () => get("/health"),
-  status: (includeHealth = false) => get("/api/ai/status", { include_health: includeHealth }),
+  status: (includeHealth = false, options = {}) =>
+    get("/api/ai/status", { include_health: includeHealth }, options),
   providers: () => get("/api/ai/providers"),
   models: (task) => get("/api/ai/models", { task }),
   usage: (days = 7, recentLimit = 50) =>
@@ -132,16 +141,41 @@ export const api = {
   testConnection: (provider, model = null) =>
     post("/api/ai/test-connection", { provider, model }),
   reloadProviders: () => post("/api/ai/reload"),
+  toggleProvider: (providerId, enabled) =>
+    patch(`/api/ai/providers/${encodeURIComponent(providerId)}`, { enabled }),
+  discoverProviderModels: (providerId, force = true) =>
+    post(
+      pathWithQuery(`/api/ai/providers/${encodeURIComponent(providerId)}/discover`, {
+        force,
+      }),
+      undefined,
+    ),
+  skills: () => get("/api/skills"),
+  toggleSkill: (skillId, enabled) =>
+    patch(`/api/skills/${encodeURIComponent(skillId)}`, { enabled }),
+  reviewSkill: (skillId, reviewed = true) =>
+    post(`/api/skills/${encodeURIComponent(skillId)}/review`, { reviewed }),
+  executeSkill: (skillId, context = {}) =>
+    post(`/api/skills/${encodeURIComponent(skillId)}/execute`, { context }),
 
   videoConfig: () => get("/api/video/config"),
   analysisConfig: () => get("/api/analysis/config"),
   clipsConfig: () => get("/api/clips/config"),
 
-  listVideoJobs: (params = {}) => get("/api/video/jobs", params),
-  getVideoJob: async (id) => (await get(`/api/video/jobs/${encodeURIComponent(id)}`)).job,
+  listVideoJobs: (params = {}, options = {}) => get("/api/video/jobs", params, options),
+  getVideoJob: async (id, options = {}) =>
+    (await get(`/api/video/jobs/${encodeURIComponent(id)}`, undefined, options)).job,
+  sourceMediaUrl: (id) => `${API_BASE}/api/video/jobs/${encodeURIComponent(id)}/media`,
   getVideoStatus: (id) => get(`/api/video/jobs/${encodeURIComponent(id)}/status`),
   retryVideo: (id) => post(`/api/video/jobs/${encodeURIComponent(id)}/retry`),
   cancelVideo: (id) => post(`/api/video/jobs/${encodeURIComponent(id)}/cancel`),
+  deleteVideo: (id) => del(`/api/video/jobs/${encodeURIComponent(id)}`),
+  restoreVideo: (id) => post(`/api/video/jobs/${encodeURIComponent(id)}/restore`),
+  purgeVideo: (id) => del(`/api/video/jobs/${encodeURIComponent(id)}/permanent`),
+  setSourcePublished: (id, published) =>
+    post(`/api/video/jobs/${encodeURIComponent(id)}/publish`, { published }),
+  regenerateSourceMetadata: (id, payload = {}) =>
+    post(`/api/video/jobs/${encodeURIComponent(id)}/metadata/regenerate`, payload),
   uploadVideo,
   addVideoUrl: (url) => post("/api/video/url", { url }),
 
@@ -158,11 +192,26 @@ export const api = {
   listSourceClips: (id, limit = 100) =>
     get(`/api/video/jobs/${encodeURIComponent(id)}/clips`, { limit }),
 
-  listClipJobs: (params = {}) => get("/api/clip-jobs", params),
+  listClipJobs: (params = {}, options = {}) => get("/api/clip-jobs", params, options),
   getClipJob: async (id) => (await get(`/api/clip-jobs/${encodeURIComponent(id)}`)).job,
   getClipStatus: (id) => get(`/api/clip-jobs/${encodeURIComponent(id)}/status`),
+  updateClipVisual: (id, payload = {}) =>
+    patch(`/api/clip-jobs/${encodeURIComponent(id)}/visual`, payload),
   renderClip: (id) => post(`/api/clip-jobs/${encodeURIComponent(id)}/render`),
   retryClip: (id) => post(`/api/clip-jobs/${encodeURIComponent(id)}/retry`),
   cancelClip: (id) => post(`/api/clip-jobs/${encodeURIComponent(id)}/cancel`),
+  deleteClip: (id) => del(`/api/clip-jobs/${encodeURIComponent(id)}`),
+  restoreClip: (id) => post(`/api/clip-jobs/${encodeURIComponent(id)}/restore`),
+  purgeClip: (id) => del(`/api/clip-jobs/${encodeURIComponent(id)}/permanent`),
+  updateClipMetadata: (id, payload) =>
+    patch(`/api/clip-jobs/${encodeURIComponent(id)}/metadata`, payload),
+  regenerateClipMetadata: (id, payload = {}) =>
+    post(`/api/clip-jobs/${encodeURIComponent(id)}/metadata/regenerate`, payload),
+  setClipPublished: (id, published) =>
+    post(`/api/clip-jobs/${encodeURIComponent(id)}/publish`, { published }),
+  listTrash: () => get("/api/trash"),
+  restoreTrash: (items) => post("/api/trash/restore", { items }),
+  purgeTrash: (items) => post("/api/trash/permanent", { items }),
+  emptyTrash: () => del("/api/trash"),
   clipDownloadUrl: (id) => `${API_BASE}/api/clip-jobs/${encodeURIComponent(id)}/download`,
 };

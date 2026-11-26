@@ -13,6 +13,7 @@ _KNOWN_SECRETS = {
     "GEMINI_API_KEY": "gemini_api_key",
     "GROQ_API_KEY": "groq_api_key",
     "OPENROUTER_API_KEY": "openrouter_api_key",
+    "NVIDIA_API_KEY": "nvidia_api_key",
 }
 
 
@@ -29,6 +30,7 @@ class Settings(BaseSettings):
     gemini_api_key: SecretStr | None = Field(default=None, validation_alias="GEMINI_API_KEY")
     groq_api_key: SecretStr | None = Field(default=None, validation_alias="GROQ_API_KEY")
     openrouter_api_key: SecretStr | None = Field(default=None, validation_alias="OPENROUTER_API_KEY")
+    nvidia_api_key: SecretStr | None = Field(default=None, validation_alias="NVIDIA_API_KEY")
 
     # Locations.
     config_dir: Path = Field(default=Path("config"), validation_alias="CLIPPING_AI_CONFIG_DIR")

@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "fixtures_file": "fixtures.json",
+  "source_policy": "synthetic_or_manually_authored_only",
+  "external_copyrighted_content": false,
+  "private_user_videos": false
+}

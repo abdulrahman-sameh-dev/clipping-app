@@ -63,6 +63,19 @@
       "extra_args": [],
       "timeout_seconds": 1800,
       "notes": "Optional local CPU provider. Point binary/model_path at an existing installation; nothing is downloaded."
+    },
+    "nvidia": {
+      "type": "openai_compatible",
+      "enabled": true,
+      "api_key_env": "NVIDIA_API_KEY",
+      "base_url": "https://integrate.api.nvidia.com/v1",
+      "gateway": false,
+      "timeout_seconds": 120,
+      "max_retries": 1,
+      "min_interval_seconds": 2.0,
+      "requests_per_minute": 10,
+      "requests_per_day": 0,
+      "notes": "NVIDIA NIM free endpoints. Models are discovered from NVIDIA's structured catalog; only Free Endpoint models are approved, and each model must pass a bounded smoke test before it is marked Ready."
     }
   }
 }

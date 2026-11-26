@@ -1,0 +1,119 @@
+{
+  "classification": {
+    "ambiguous": false,
+    "confidence": 0.66,
+    "content_type": "general",
+    "reasons": [
+      "speech coverage 1.00",
+      "audio activity 0.00",
+      "silence ratio 0.00",
+      "scene changes 0.0/min",
+      "mean motion 0.00",
+      "duration 3s",
+      "selected general over podcast by 0.20 confidence margin"
+    ],
+    "scores": {
+      "educational": 0.38,
+      "gaming": 0.2,
+      "general": 0.66,
+      "live": 0.03,
+      "podcast": 0.46
+    }
+  },
+  "content_type": "general",
+  "duration": 3.0,
+  "highlights": [
+    {
+      "category": "question_answer",
+      "confidence": 1.0,
+      "description": "Why did the game change?",
+      "detection_signals": {
+        "transcript": 1.0
+      },
+      "end_time": 1.0,
+      "selection_reason": "Transcript window with a self-contained statement, useful keywords, and complete segment boundaries.",
+      "signal_score": null,
+      "source": "transcript",
+      "start_time": 0.0,
+      "title": "Why did the game change?",
+      "transcript_segments": [
+        {
+          "end": 1.0,
+          "id": 0,
+          "start": 0.0,
+          "text": "Why did the game change?",
+          "words": null
+        }
+      ]
+    },
+    {
+      "category": "explanation",
+      "confidence": 1.0,
+      "description": "Because we won the final round!",
+      "detection_signals": {
+        "transcript": 1.0
+      },
+      "end_time": 2.0,
+      "selection_reason": "Transcript window with a self-contained statement, useful keywords, and complete segment boundaries.",
+      "signal_score": null,
+      "source": "transcript",
+      "start_time": 1.0,
+      "title": "Because we won the final round!",
+      "transcript_segments": [
+        {
+          "end": 2.0,
+          "id": 1,
+          "start": 1.0,
+          "text": "Because we won the final round!",
+          "words": null
+        }
+      ]
+    },
+    {
+      "category": "question_answer",
+      "confidence": 1.0,
+      "description": "What happened next?",
+      "detection_signals": {
+        "transcript": 1.0
+      },
+      "end_time": 3.0,
+      "selection_reason": "Transcript window with a self-contained statement, useful keywords, and complete segment boundaries.",
+      "signal_score": null,
+      "source": "transcript",
+      "start_time": 2.0,
+      "title": "What happened next?",
+      "transcript_segments": [
+        {
+          "end": 3.0,
+          "id": 2,
+          "start": 2.0,
+          "text": "What happened next?",
+          "words": null
+        }
+      ]
+    }
+  ],
+  "job_id": "golden-job",
+  "language": "en",
+  "method": "deterministic",
+  "notes": [
+    "Content classified as general (confidence 0.66).",
+    "Deterministic highlight selection was used."
+  ],
+  "signals": {
+    "active_audio_ratio": null,
+    "audio_analyzed": true,
+    "audio_windows": 0,
+    "max_energy": null,
+    "max_motion": null,
+    "mean_energy": null,
+    "mean_motion": null,
+    "motion_analyzed": true,
+    "motion_samples": 0,
+    "notes": [],
+    "scene_changes": 0,
+    "scene_rate_per_minute": 0.0,
+    "silence_ratio": null,
+    "video_analyzed": true
+  }
+}

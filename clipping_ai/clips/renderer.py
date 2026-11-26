@@ -39,6 +39,7 @@ class RenderResult:
     duration: float
     filter_graph: str = ""
     effect_filters: tuple[str, ...] = ()
+    overlay_path: Path | None = None
 
 
 def _run_probe(binary: str, path: Path, timeout: float) -> dict[str, Any]:
@@ -198,6 +199,7 @@ def build_filter_graph(
     job: ClipJob,
     config: ClipConfig,
     edit_plan: EditPlan | None = None,
+    overlay_path: Path | None = None,
 ) -> str:
     graph = _base_filter(job, config)
     label = "vbase"
@@ -215,10 +217,16 @@ def build_filter_graph(
             )
         graph += (
             f";[{label}]ass=filename={job.caption_path.name}:"
-            f"shaping={config.caption_shaping}[vout]"
+            f"shaping={config.caption_shaping}[vcap]"
         )
-    else:
-        graph += f";[{label}]null[vout]"
+        label = "vcap"
+    if overlay_path is not None:
+        graph += (
+            f";[{label}]ass=filename={overlay_path.name}:"
+            f"shaping={config.caption_shaping}[vover]"
+        )
+        label = "vover"
+    graph += f";[{label}]null[vout]"
     return graph
 
 
@@ -298,6 +306,7 @@ def render_clip(
     cancel_check: _CancelCheck | None = None,
     source_info: MediaInfo | None = None,
     edit_plan: EditPlan | None = None,
+    overlay_path: Path | None = None,
 ) -> RenderResult:
     source_path = source_path.expanduser().resolve()
     output_path = output_path.expanduser().resolve()
@@ -329,6 +338,21 @@ def render_clip(
             )
         job = job.model_copy(update={"caption_path": caption_path})
 
+    if overlay_path is not None:
+        overlay_path = overlay_path.expanduser().resolve()
+        if overlay_path.parent != output_path.parent:
+            raise AIError(
+                ErrorCategory.INTERNAL_ERROR,
+                "Overlay file must be in the same directory as the rendered clip.",
+                retryable=False,
+            )
+        if not overlay_path.is_file():
+            raise AIError(
+                ErrorCategory.NOT_FOUND,
+                f"Overlay file '{overlay_path}' does not exist.",
+                retryable=False,
+            )
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
     info = source_info or probe_media(source_path, config)
     if not info.has_video:
@@ -357,7 +381,7 @@ def render_clip(
     part_path = output_path.with_name(f"{output_path.stem}.part{output_path.suffix}")
     log_path = output_path.with_name(f"{output_path.stem}.ffmpeg.log")
     _cleanup(part_path)
-    graph = build_filter_graph(job, config, edit_plan)
+    graph = build_filter_graph(job, config, edit_plan, overlay_path)
     effect_filters = tuple(
         _effect_filters(job, edit_plan.effects if edit_plan is not None else (), config)
     )
@@ -475,4 +499,5 @@ def render_clip(
         duration=output_info.duration,
         filter_graph=graph,
         effect_filters=effect_filters,
+        overlay_path=overlay_path,
     )

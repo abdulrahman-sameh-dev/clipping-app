@@ -4,7 +4,7 @@
     "require_verified_free": false,
     "allow_unverified_free_if_manually_approved": true,
     "fallback_on_rate_limit": true,
-    "fallback_on_quota_exhausted": false,
+    "fallback_on_quota_exhausted": true,
     "fallback_on_provider_unavailable": true,
     "fallback_on_model_unavailable": true,
     "fallback_on_timeout": true,

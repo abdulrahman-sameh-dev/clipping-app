@@ -10,8 +10,9 @@
 | `config/policy.json` | Free-only, fallback, retry, and schema-retry settings |
 | `config/video.json` | Video limits, formats, ffmpeg, audio chunking, worker |
 | `config/analysis.json` | Transcription defaults and highlight-detection thresholds |
-| `config/clips.json` | Clip formats, quality, captions, FFmpeg limits, worker |
-| `config/local/` | Generated local overrides; ignored by git |
+| `config/clips.json` | Clip formats, quality, captions, visual composition, FFmpeg limits, worker |
+| `config/skills/` | Optional external skill manifests; data-only and disabled until reviewed |
+| `config/local/` | Generated local overrides and skill state; ignored by git |
 
 Configuration is loaded at startup. `POST /api/ai/reload` or restarting the service
 reloads it.
@@ -24,6 +25,7 @@ Copy `.env.example` to `.env`.
 GEMINI_API_KEY=
 GROQ_API_KEY=
 OPENROUTER_API_KEY=
+NVIDIA_API_KEY=
 ```
 
 Optional settings:
@@ -113,6 +115,9 @@ suggestions. Defaults:
     "enabled": true,
     "min_clip_seconds": 12,
     "max_clip_seconds": 180,
+    "target_clip_seconds_min": 30,
+    "target_clip_seconds_max": 45,
+    "target_duration_tolerance_seconds": 15,
     "max_highlights": 10,
     "candidate_window_seconds": 60,
     "candidate_stride_seconds": 30,
@@ -171,6 +176,10 @@ Notes:
 - `min_clip_seconds`/`max_clip_seconds` bound suggested clips. The default maximum
   is 180s so a complete explanation is not truncated solely to fit a short-form
   target. Short jobs can still return no highlights.
+- `target_clip_seconds_min`/`target_clip_seconds_max` define the preferred 30-45s
+  short-form range. This is a soft target: sentence completeness wins, and overly
+  long moments are split only at transcript boundaries when they exceed the target
+  plus `target_duration_tolerance_seconds`. Set both target values or neither.
 - `candidate_stride_seconds` must be less than or equal to
   `candidate_window_seconds`.
 - `audio_event_min_energy` and `audio_peak_delta` control sustained audio events and
@@ -276,7 +285,13 @@ Notes:
     "effects_transitions": true,
     "effects_transition_duration": 0.3,
     "auto_vertical_fit": true,
-    "vertical_landscape_fit": "blur"
+    "vertical_landscape_fit": "blur",
+    "metadata_auto_generate": true,
+    "metadata_batch_size": 6,
+    "metadata_min_hashtags": 2,
+    "metadata_max_hashtags": 4,
+    "metadata_title_max_chars": 120,
+    "metadata_description_max_chars": 2200
   }
 }
 ```
@@ -329,6 +344,18 @@ Notes:
 - Successful renders write `render_diagnostics.json` beside the clip. It records the
   selected effects, effect filters, full filter graph, caption style, and output
   information for troubleshooting and acceptance checks.
+- `metadata_auto_generate` schedules non-blocking title/description/hashtag batches
+  when clips are created. Generation uses only clip-range transcript and highlight
+  context, so it can finish before rendering. `metadata_batch_size` bounds clips per
+  AI request (default `6`, maximum `12`); failed batches split recursively. Provider
+  or quota failures fall back to local metadata when transcript context exists, or
+  remain `failed`/`deferred_quota`; they never fail rendering. Successful values use
+  `generated`, local values use `local_fallback`. Manual edits set
+  `manually_edited` and are protected from automatic overwrite.
+- `metadata_min_hashtags`/`metadata_max_hashtags` bound generated hashtags.
+  Manual edits keep exactly the hashtags supplied (no padding).
+- `metadata_title_max_chars`/`metadata_description_max_chars` truncate stored
+  metadata to fit common publishing fields.
 - `config/local/clips.json` deep-merges over the base file.
 
 ## Provider fields
@@ -339,6 +366,8 @@ Notes:
   "enabled": true,
   "api_key_env": "GEMINI_API_KEY",
   "litellm_prefix": "gemini/",
+  "base_url": null,
+  "gateway": false,
   "timeout_seconds": 90,
   "max_retries": 2,
   "min_interval_seconds": 1.0,
@@ -347,6 +376,24 @@ Notes:
   "extra_headers": {},
   "notes": "..."
 }
+```
+
+An OpenAI-compatible gateway uses `type: "openai_compatible"` and requires an explicit
+`base_url`, for example `https://gateway.example/v1`. The adapter posts to
+`/chat/completions` with a bearer key from `api_key_env`. It never infers a URL or a
+model ID. `gateway: true` identifies a model aggregator whose underlying provider is
+declared on the model entry. The bundled NVIDIA provider uses
+`base_url: https://integrate.api.nvidia.com/v1` and discovers models from NVIDIA's
+structured catalog. Only resources labelled `Free Endpoint` are approved; partner
+and download-only resources are ignored. Discovery metadata is cached at
+`config/local/nvidia-catalog.json` for seven days by default. Presence in NVIDIA's
+public `/v1/models` list is not a successful inference test, so discovered models
+remain Not Ready until a bounded smoke test succeeds.
+
+Refresh discovery from the Providers screen or with:
+
+```bash
+curl -X POST "http://127.0.0.1:8000/api/ai/providers/nvidia/discover?force=true"
 ```
 
 Speech-specific fields:
@@ -370,11 +417,19 @@ whisper.cpp-specific fields:
   "provider": "gemini",
   "provider_model_id": "gemini-3.8-flash",
   "litellm_model": null,
+  "underlying_provider": null,
+  "underlying_model": null,
   "tasks": ["content_analysis", "highlight_detection"],
   "free": true,
   "free_verified": true,
   "verified_at": "2026-11-09",
   "verification_source": "https://ai.google.dev/gemini-api/docs/pricing",
+  "access_type": "unknown",
+  "pricing_status": "free",
+  "api_available": "unknown",
+  "verification_status": "verified",
+  "discovered": false,
+  "catalog_source": null,
   "context_window": 1000000,
   "max_output_tokens": 8192,
   "supports_json": true,
@@ -392,6 +447,13 @@ Important:
 - `tasks` must include the requested task.
 - `supports_json` must be true for structured text tasks.
 - `daily_request_limit` is a local guard, not a provider quota report.
+- Gateway models declare `underlying_provider`/`underlying_model` so cooldown from a
+  quota-exhausted underlying provider also blocks the gateway route.
+- Discovered NVIDIA models set `discovered: true`, `access_type: free_endpoint`,
+  `pricing_status: free`, and an `api_available` value of `true`, `false`, or
+  `"unknown"`. Only `verification_status: verified` models are Ready.
+- Catalog-derived overrides preserve local verification fields when discovery is
+  refreshed. Stale discovered models disappear unless they were manually added.
 
 ## Routing
 
@@ -408,7 +470,25 @@ Important:
 ```
 
 Candidates are filtered by policy and availability. The first eligible candidate is
-tried first; fallback only happens for error categories allowed by policy.
+tried first; fallback only happens for error categories allowed by policy. Free-quota
+exhaustion is retryable across free providers by default. The manager records a
+cooldown for the exhausted provider (provider `retry_after`, otherwise the next UTC
+midnight for daily-quota messages, or one hour), skips it on subsequent calls, and
+never falls through to a paid model.
+
+## Skills
+
+Skill manifests are JSON data only. Built-in manifests live in
+`clipping_ai/skills/manifests/`; optional external manifests can be placed in
+`config/skills/`. External skills are discovered disabled and must be reviewed before
+they can be enabled. Skill state is stored in `config/local/skills.json`.
+
+A manifest declares an ID, tools, permissions, timeout, and concurrency. Only tools
+already registered by the application can run. Unknown tools are rejected, external
+manifests cannot supply executable code, and network/filesystem/subprocess access is
+denied unless the manifest declares the matching permission. Current built-in tools
+are `composition.caption_plan`, `composition.moment_plan`,
+`composition.callout_plan`, and `analysis.explainer_plan`.
 
 ## Policy
 
@@ -418,7 +498,7 @@ tried first; fallback only happens for error categories allowed by policy.
     "require_verified_free": false,
     "allow_unverified_free_if_manually_approved": true,
     "fallback_on_rate_limit": true,
-    "fallback_on_quota_exhausted": false,
+    "fallback_on_quota_exhausted": true,
     "fallback_on_provider_unavailable": true,
     "fallback_on_model_unavailable": true,
     "fallback_on_timeout": true,
@@ -459,6 +539,11 @@ AI endpoints are under `/api/ai`:
 | POST | `/transcribe` | Transcribe a local audio path |
 | POST | `/verify-free/{model_id}` | Check free pricing where supported |
 | POST | `/reload` | Reload config and rebuild providers |
+| PATCH | `/providers/{provider_id}` | Persist a provider enable/disable override |
+| GET | `/api/skills` | List skills, registered tools, and external directory |
+| PATCH | `/api/skills/{skill_id}` | Enable or disable a skill |
+| POST | `/api/skills/{skill_id}/review` | Mark an external skill reviewed |
+| POST | `/api/skills/{skill_id}/execute` | Run declared built-in tools with a context object |
 
 Video and analysis endpoints:
 
@@ -468,10 +553,19 @@ Video and analysis endpoints:
 | POST | `/api/video/upload` | Upload a local video (`multipart/form-data`, field `file`) |
 | POST | `/api/video/url` | Queue a URL job with `{"url": "https://..."}` |
 | GET | `/api/video/jobs?limit=&status=` | List recent jobs |
-| GET | `/api/video/jobs/{job_id}` | Full job, metadata, audio paths, errors |
+| GET | `/api/video/jobs/{job_id}` | Public job data, metadata, errors |
 | GET | `/api/video/jobs/{job_id}/status` | Compact status/stage/progress |
+
+Source job payloads include `all_clips_published`, `all_clips_published_at`, and
+`clip_counts: {"total": n, "published": n}`. Publishing completion is manual; setting
+it to `false` clears the timestamp. Creating new clips resets completion to `false`.
 | POST | `/api/video/jobs/{job_id}/retry` | Requeue a failed or cancelled job |
 | POST | `/api/video/jobs/{job_id}/cancel` | Cancel a queued job |
+| POST | `/api/video/jobs/{job_id}/publish` | Set manual `all_clips_published` completion |
+| POST | `/api/video/jobs/{job_id}/metadata/regenerate` | Retry/source-batch metadata generation |
+| DELETE | `/api/video/jobs/{job_id}` | Move a source video to trash |
+| POST | `/api/video/jobs/{job_id}/restore` | Restore a source video from trash |
+| DELETE | `/api/video/jobs/{job_id}/permanent` | Permanently delete a trashed source and its owned files |
 | GET | `/api/analysis/config` | Effective transcription/highlight settings |
 | POST | `/api/video/jobs/{job_id}/transcribe` | Transcribe prepared job audio |
 | GET | `/api/video/jobs/{job_id}/transcript` | Stored transcript and error metadata |
@@ -481,13 +575,24 @@ Video and analysis endpoints:
 | GET | `/api/clips/config` | Effective clip formats, captions, and FFmpeg limits |
 | POST | `/api/video/jobs/{job_id}/clips` | Create and optionally render highlight clips |
 | GET | `/api/video/jobs/{job_id}/clips` | List clip jobs for a source video job |
-| GET | `/api/clip-jobs?limit=&status=&source_job_id=` | List recent clip jobs |
-| GET | `/api/clip-jobs/{clip_id}` | Full clip job, paths, errors |
+| GET | `/api/clip-jobs?limit=&status=&source_job_id=&ids=` | List recent clip jobs; `ids` accepts comma-separated clip ids |
+| GET | `/api/clip-jobs/{clip_id}` | Public clip job data, metadata, errors |
 | GET | `/api/clip-jobs/{clip_id}/status` | Compact clip status/stage/progress |
 | POST | `/api/clip-jobs/{clip_id}/render` | Render or resume one clip job |
 | POST | `/api/clip-jobs/{clip_id}/retry` | Requeue a failed or cancelled clip |
 | POST | `/api/clip-jobs/{clip_id}/cancel` | Cancel a queued clip or request cancellation |
+| PATCH | `/api/clip-jobs/{clip_id}/visual` | Save visual settings and optionally requeue a ready clip |
+| PATCH | `/api/clip-jobs/{clip_id}/metadata` | Save manually edited title, description, hashtags |
+| POST | `/api/clip-jobs/{clip_id}/metadata/regenerate` | Generate or regenerate publishing metadata |
+| POST | `/api/clip-jobs/{clip_id}/publish` | Set the manual published status |
+| DELETE | `/api/clip-jobs/{clip_id}` | Move a clip to trash |
+| POST | `/api/clip-jobs/{clip_id}/restore` | Restore a clip from trash |
+| DELETE | `/api/clip-jobs/{clip_id}/permanent` | Permanently delete a trashed clip and its owned files |
 | GET | `/api/clip-jobs/{clip_id}/download` | Download a ready MP4 |
+| GET | `/api/trash` | List trashed source videos and clips |
+| POST | `/api/trash/restore` | Restore selected trash items |
+| POST | `/api/trash/permanent` | Permanently delete selected trash items |
+| DELETE | `/api/trash` | Empty the trash |
 
 Example analyze request:
 
@@ -554,6 +659,16 @@ Example clip request:
   "fit": "crop",
   "captions": true,
   "caption_language": "ar",
+  "visual_settings": {
+    "visual_enhancement": true,
+    "intensity": "balanced",
+    "captions": true,
+    "zoom": true,
+    "punch": true,
+    "emphasis": true,
+    "transitions": true,
+    "callouts": true
+  },
   "highlight_indices": [0, 1],
   "limit": 2,
   "render": true
@@ -562,6 +677,10 @@ Example clip request:
 
 Set `"render": false` to queue jobs for the background worker. Captions require a
 stored transcript; the API returns `invalid_request` rather than inventing text.
+`visual_enhancement: false` disables effects and callouts while leaving captions
+available. Intensity scales effects (`subtle` 0.6, `balanced` 1.0, `strong` 1.25) and
+sets the default maximum visual effects to 1, 2, or 3. Upserted settings persist on
+the clip; re-rendering a ready clip is explicit.
 
 ## CLI
 

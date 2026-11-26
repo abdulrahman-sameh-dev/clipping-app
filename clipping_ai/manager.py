@@ -8,15 +8,19 @@ import random
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
+from functools import partial
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel
 
 from clipping_ai import __version__
+from clipping_ai.audio import AudioChunk
 from clipping_ai.errors import AIError, ErrorCategory, missing_key
 from clipping_ai.jobs import TranscriptionCache
 from clipping_ai.policy import FreeOnlyPolicy
+from clipping_ai.providers import nvidia_catalog
 from clipping_ai.providers.base import (
     BaseSpeechProvider,
     BaseTextProvider,
@@ -25,7 +29,9 @@ from clipping_ai.providers.base import (
 )
 from clipping_ai.providers.groq_speech import GroqSpeechProvider
 from clipping_ai.providers.litellm_text import LitellmTextProvider
+from clipping_ai.providers.openai_compatible import OpenAICompatibleProvider
 from clipping_ai.providers.whisper_cpp import WhisperCppProvider
+from clipping_ai.recovery.providers import ProviderRuntimeStore
 from clipping_ai.registry import ModelEntry, Registry
 from clipping_ai.retry import compute_delay
 from clipping_ai.routing import Router, RoutingResult
@@ -89,8 +95,10 @@ class ProviderManager:
         throttle: Throttle | None = None,
         sleep_fn: Callable[[float], None] = time.sleep,
         rng: random.Random | None = None,
+        runtime_store: ProviderRuntimeStore | None = None,
     ) -> None:
         self.settings = settings
+        self.runtime = runtime_store or ProviderRuntimeStore(settings.jobs_db_path)
         self.registry = registry
         self.usage = usage
         self.providers = providers
@@ -100,6 +108,8 @@ class ProviderManager:
         self._sleep = sleep_fn
         self._rng = rng or random.Random()
         self._health: dict[str, ConnectionResult] = {}
+        self._quota_blocked_until: dict[str, float] = {}
+        self._provider_events: dict[str, dict[str, Any]] = {}
 
     # --------------------------------------------------------------- construction
     @classmethod
@@ -126,6 +136,10 @@ class ProviderManager:
         for provider_id, config in registry.providers.items():
             if config.type == "litellm":
                 providers[provider_id] = LitellmTextProvider(
+                    provider_id, config, secret_getter=settings.get_secret
+                )
+            elif config.type == "openai_compatible":
+                providers[provider_id] = OpenAICompatibleProvider(
                     provider_id, config, secret_getter=settings.get_secret
                 )
             elif config.type == "groq_speech":
@@ -160,11 +174,102 @@ class ProviderManager:
             sleep_fn=self._sleep,
             rng=self._rng,
         )
+        blocked = self._quota_blocked_until
+        events = self._provider_events
+        runtime = self.runtime
         self.__dict__.update(fresh.__dict__)
+        self._quota_blocked_until = blocked
+        self._provider_events = events
+        self.runtime = runtime
+
+    # ----------------------------------------------------------- quota cooldown
+    @staticmethod
+    def _quota_block_seconds(error: AIError) -> float:
+        if error.retry_after is not None and error.retry_after > 0:
+            return max(1.0, min(float(error.retry_after), 86400.0))
+        message = error.message.lower()
+        daily_markers = (
+            "per day",
+            "daily",
+            "day limit",
+            "requests per day",
+            "rpd",
+        )
+        if any(marker in message for marker in daily_markers):
+            now = datetime.now(UTC)
+            reset = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+            return max(1.0, (reset - now).total_seconds())
+        return 3600.0
+
+    def _block_provider_quota(self, provider: str, error: AIError) -> None:
+        until = time.time() + self._quota_block_seconds(error)
+        self._quota_blocked_until[provider] = max(
+            until, self._quota_blocked_until.get(provider, 0.0)
+        )
+        self.runtime.set_cooldown(
+            provider,
+            until=self._quota_blocked_until[provider],
+            reason="free_quota_exhausted",
+            category=error.category.value,
+            quota_reset_at=until,
+        )
+
+    def _provider_cooldown(self, provider: str) -> float:
+        until = self._quota_blocked_until.get(provider, 0.0)
+        remaining = until - time.time()
+        if remaining <= 0:
+            self._quota_blocked_until.pop(provider, None)
+            persisted = self.runtime.cooldown_remaining(provider)
+            if persisted > 0:
+                self._quota_blocked_until[provider] = time.time() + persisted
+                return persisted
+            return 0.0
+        return remaining
+
+    def _candidate_cooldown(self, entry: ModelEntry) -> tuple[str, float]:
+        """Return the blocking provider and remaining cooldown for an entry.
+
+        Gateway models can declare an underlying direct provider. If that
+        provider is cooling down, the gateway route is skipped conservatively
+        because the gateway would likely hit the same free quota.
+        """
+        remaining = self._provider_cooldown(entry.provider)
+        if remaining > 0:
+            return entry.provider, remaining
+        underlying = entry.underlying_provider
+        if underlying:
+            remaining = self._provider_cooldown(underlying)
+            if remaining > 0:
+                return underlying, remaining
+        return "", 0.0
+
+    def _record_provider_event(
+        self,
+        provider: str,
+        *,
+        success: bool,
+        category: str | None = None,
+        retry_after_seconds: float | None = None,
+    ) -> None:
+        event = self._provider_events.setdefault(provider, {})
+        stamp = datetime.now(UTC).isoformat()
+        if success:
+            event["last_success"] = stamp
+            self.runtime.record_success(provider)
+        else:
+            event["last_failure"] = stamp
+            event["last_error_category"] = category
+            if category is not None:
+                self.runtime.record_failure(
+                    provider,
+                    category=category,
+                    retry_after_seconds=retry_after_seconds,
+                )
 
     # ------------------------------------------------------------------- discovery
     def list_providers(self) -> list[dict[str, Any]]:
         result: list[dict[str, Any]] = []
+        cached_nvidia = nvidia_catalog.load_cache(self.settings.config_dir)
         for provider_id, config in self.registry.providers.items():
             provider = self.providers.get(provider_id)
             if provider is None:
@@ -180,21 +285,41 @@ class ProviderManager:
             if not config.enabled:
                 status = "disabled"
             env_var = config.api_key_env
-            result.append(
-                {
-                    "id": provider_id,
-                    "type": config.type,
-                    "enabled": config.enabled,
-                    "configured": available,
-                    "status": status,
-                    "key_present": bool(env_var and self.settings.has_secret(env_var)),
-                    "api_key_env": env_var,
-                    "capabilities": _capabilities_for_type(config.type),
-                    "models": len(self.registry.models_for_provider(provider_id)),
-                    "reason": reason,
-                    "last_health": _connection_dict(self._health.get(provider_id)),
+            free_models = [m for m in self.registry.models_for_provider(provider_id) if m.free]
+            free_enabled = [m for m in free_models if m.is_enabled()]
+            event = self._provider_events.get(provider_id, {})
+            persisted = self.runtime.get(provider_id)
+            item = {
+                "id": provider_id,
+                "type": config.type,
+                "enabled": config.enabled,
+                "gateway": config.gateway,
+                "base_url_configured": bool(config.base_url),
+                "free_models": len(free_models),
+                "free_models_enabled": len(free_enabled),
+                "cooldown_seconds": round(self._provider_cooldown(provider_id), 1),
+                "last_success": event.get("last_success")
+                or (persisted.last_success_at if persisted else None),
+                "last_failure": event.get("last_failure")
+                or (persisted.last_failure_at if persisted else None),
+                "last_error_category": event.get("last_error_category")
+                or (persisted.last_failure_category if persisted else None),
+                "configured": available,
+                "status": status,
+                "key_present": bool(env_var and self.settings.has_secret(env_var)),
+                "api_key_env": env_var,
+                "capabilities": _capabilities_for_type(config.type),
+                "models": len(self.registry.models_for_provider(provider_id)),
+                "reason": reason,
+                "last_health": _connection_dict(self._health.get(provider_id)),
+            }
+            if provider_id == "nvidia":
+                item["catalog"] = {
+                    "updated_at": cached_nvidia.get("updated_at") if cached_nvidia else None,
+                    "models": len(cached_nvidia.get("models") or []) if cached_nvidia else 0,
+                    "stats": cached_nvidia.get("stats") if cached_nvidia else {},
                 }
-            )
+            result.append(item)
         return result
 
     def list_models(self) -> list[dict[str, Any]]:
@@ -209,12 +334,20 @@ class ProviderManager:
                 }
                 for task in entry.tasks
             }
+            ready = (
+                entry.free
+                and entry.is_enabled()
+                and available
+                and entry.api_available is not False
+                and entry.verification_status == "verified"
+            )
             result.append(
                 {
                     **entry.model_dump(mode="json"),
                     "provider_available": available,
                     "provider_reason": reason,
                     "free_approved": entry.free and entry.is_enabled(),
+                    "ready": ready,
                     "eligibility": eligibility,
                 }
             )
@@ -224,9 +357,7 @@ class ProviderManager:
         if include_health:
             self.health_check()
         providers = self.list_providers()
-        free_models = [
-            m for m in self.registry.models.values() if m.free and m.is_enabled()
-        ]
+        free_models = [m for m in self.registry.models.values() if m.free and m.is_enabled()]
         ready = any(p["configured"] and p["models"] > 0 for p in providers) and bool(free_models)
         return {
             "ready": ready,
@@ -256,9 +387,7 @@ class ProviderManager:
             if provider is None:
                 continue
             if isinstance(provider, WhisperCppProvider):
-                self._health[provider_id] = provider.health(
-                    self._first_free_model(provider_id)
-                )
+                self._health[provider_id] = provider.health(self._first_free_model(provider_id))
                 continue
             available, reason = provider.available()
             if not available:
@@ -298,9 +427,7 @@ class ProviderManager:
         return dict(self._health)
 
     # -------------------------------------------------------------- connection test
-    def test_connection(
-        self, provider_id: str, model_id: str | None = None
-    ) -> dict[str, Any]:
+    def test_connection(self, provider_id: str, model_id: str | None = None) -> dict[str, Any]:
         config = self.registry.get_provider(provider_id)
         if config is None:
             raise AIError(
@@ -379,6 +506,8 @@ class ProviderManager:
                 message=exc.message,
                 details={"category": exc.category.value},
             )
+            if entry.provider == "nvidia":
+                self._record_nvidia_verification(entry, self._health[provider_id])
             return _connection_dict(self._health[provider_id]) or {}
 
         details = result.details or {}
@@ -394,6 +523,8 @@ class ProviderManager:
             latency_ms=result.latency_ms,
         )
         self._health[provider_id] = result
+        if entry.provider == "nvidia":
+            self._record_nvidia_verification(entry, result)
         return _connection_dict(result) or {}
 
     # ------------------------------------------------------------------ text tasks
@@ -408,6 +539,7 @@ class ProviderManager:
         provider: str | None = None,
         model: str | None = None,
         payload: dict[str, Any] | None = None,
+        schema: type[BaseModel] | None = None,
     ) -> dict[str, Any]:
         if task not in TEXT_TASKS:
             raise AIError(
@@ -434,6 +566,7 @@ class ProviderManager:
             instructions=instructions,
             provider=provider,
             model=model,
+            schema=schema,
         )
         data = (
             execution.data.model_dump(mode="json")
@@ -457,8 +590,9 @@ class ProviderManager:
         instructions: str | None = None,
         provider: str | None = None,
         model: str | None = None,
+        schema: type[BaseModel] | None = None,
     ) -> TextExecution:
-        schema = schema_for_task(task)
+        schema = schema or schema_for_task(task)
         routing = self.router.resolve(task, provider=provider, model=model)
         self._raise_if_no_candidates(routing, task, explicit=bool(provider or model))
 
@@ -469,6 +603,31 @@ class ProviderManager:
 
         for index, candidate in enumerate(routing.candidates):
             entry = candidate.entry
+            blocking_provider, cooldown = self._candidate_cooldown(entry)
+            if cooldown > 0:
+                last_error = AIError(
+                    ErrorCategory.FREE_QUOTA_EXHAUSTED,
+                    f"Provider '{blocking_provider}' is cooling down after free-quota "
+                    f"exhaustion; retry in about {math.ceil(cooldown)}s.",
+                    provider=entry.provider,
+                    model=entry.id,
+                    task=task,
+                    retryable=False,
+                    retry_after=cooldown,
+                )
+                attempts.append(
+                    Attempt(
+                        entry.provider,
+                        entry.id,
+                        False,
+                        last_error.category.value,
+                        last_error.message,
+                    )
+                )
+                if provider or model:
+                    raise last_error
+                continue
+
             provider_obj = self.providers.get(entry.provider)
             if not isinstance(provider_obj, BaseTextProvider):
                 last_error = AIError(
@@ -479,7 +638,15 @@ class ProviderManager:
                     task=task,
                     retryable=False,
                 )
-                attempts.append(Attempt(entry.provider, entry.id, False, last_error.category.value, last_error.message))
+                attempts.append(
+                    Attempt(
+                        entry.provider,
+                        entry.id,
+                        False,
+                        last_error.category.value,
+                        last_error.message,
+                    )
+                )
                 if not self.policy.can_fallback(last_error):
                     raise last_error
                 continue
@@ -487,7 +654,15 @@ class ProviderManager:
             available, reason = provider_obj.available()
             if not available:
                 last_error = _availability_error(entry.provider, reason, self.registry)
-                attempts.append(Attempt(entry.provider, entry.id, False, last_error.category.value, last_error.message))
+                attempts.append(
+                    Attempt(
+                        entry.provider,
+                        entry.id,
+                        False,
+                        last_error.category.value,
+                        last_error.message,
+                    )
+                )
                 if provider or model:
                     raise last_error
                 continue
@@ -501,7 +676,15 @@ class ProviderManager:
                     task=task,
                     retryable=False,
                 )
-                attempts.append(Attempt(entry.provider, entry.id, False, last_error.category.value, last_error.message))
+                attempts.append(
+                    Attempt(
+                        entry.provider,
+                        entry.id,
+                        False,
+                        last_error.category.value,
+                        last_error.message,
+                    )
+                )
                 if not self.policy.can_fallback(last_error):
                     raise last_error
                 continue
@@ -519,6 +702,16 @@ class ProviderManager:
                 )
             except AIError as exc:
                 last_error = exc
+                if exc.category == ErrorCategory.FREE_QUOTA_EXHAUSTED:
+                    self._block_provider_quota(entry.provider, exc)
+                    if entry.underlying_provider:
+                        self._block_provider_quota(entry.underlying_provider, exc)
+                self._record_provider_event(
+                    entry.provider,
+                    success=False,
+                    category=exc.category.value,
+                    retry_after_seconds=exc.retry_after,
+                )
                 if index == len(routing.candidates) - 1 or not self.policy.can_fallback(exc):
                     raise
                 logger.warning(
@@ -526,6 +719,7 @@ class ProviderManager:
                 )
                 continue
             execution.used_fallback = index > 0
+            self._record_provider_event(entry.provider, success=True)
             return execution
 
         raise last_error or _no_candidate_error(routing, task)
@@ -604,7 +798,9 @@ class ProviderManager:
                 raise
 
             self._record_completion(entry, task, completion, retry_count=total_retries)
-            attempts.append(Attempt(entry.provider, entry.id, True, latency_ms=completion.latency_ms))
+            attempts.append(
+                Attempt(entry.provider, entry.id, True, latency_ms=completion.latency_ms)
+            )
             return TextExecution(
                 task=task,
                 provider=entry.provider,
@@ -674,12 +870,198 @@ class ProviderManager:
                     rng=self._rng,
                 )
                 logger.info(
-                    "Retrying %s/%s after %.1fs (%s)", entry.provider, entry.id, delay, exc.category.value
+                    "Retrying %s/%s after %.1fs (%s)",
+                    entry.provider,
+                    entry.id,
+                    delay,
+                    exc.category.value,
                 )
                 self._sleep(delay)
                 attempt += 1
 
     # ----------------------------------------------------------------- speech tasks
+    def can_transcribe_prepared_chunks(
+        self, *, provider: str | None = None, model: str | None = None
+    ) -> bool:
+        """Whether the selected free speech route accepts prepared chunks."""
+        routing = self.router.resolve("speech_to_text", provider=provider, model=model)
+        for candidate in routing.candidates:
+            provider_obj = self.providers.get(candidate.entry.provider)
+            if not isinstance(provider_obj, BaseSpeechProvider):
+                continue
+            if not provider_obj.supports_prepared_chunks:
+                continue
+            _, cooldown = self._candidate_cooldown(candidate.entry)
+            if cooldown > 0:
+                continue
+            available, _ = provider_obj.available()
+            if available:
+                return True
+        return False
+
+    def transcribe_chunk(
+        self,
+        chunk: AudioChunk,
+        *,
+        provider: str | None = None,
+        model: str | None = None,
+        language: str | None = None,
+        word_timestamps: bool = True,
+        prompt: str | None = None,
+    ) -> dict[str, Any]:
+        """Transcribe one prepared chunk through the normal routing/retry path."""
+        task = "speech_to_text"
+        routing = self.router.resolve(task, provider=provider, model=model)
+        self._raise_if_no_candidates(routing, task, explicit=bool(provider or model))
+        attempts: list[Attempt] = []
+        last_error: AIError | None = None
+
+        for index, candidate in enumerate(routing.candidates):
+            entry = candidate.entry
+            blocking_provider, cooldown = self._candidate_cooldown(entry)
+            if cooldown > 0:
+                last_error = AIError(
+                    ErrorCategory.FREE_QUOTA_EXHAUSTED,
+                    f"Provider '{blocking_provider}' is cooling down after free-quota "
+                    f"exhaustion; retry in about {math.ceil(cooldown)}s.",
+                    provider=entry.provider,
+                    model=entry.id,
+                    task=task,
+                    retryable=False,
+                    retry_after=cooldown,
+                )
+                attempts.append(
+                    Attempt(
+                        entry.provider,
+                        entry.id,
+                        False,
+                        last_error.category.value,
+                        last_error.message,
+                    )
+                )
+                if provider or model:
+                    raise last_error
+                continue
+
+            provider_obj = self.providers.get(entry.provider)
+            if not isinstance(provider_obj, BaseSpeechProvider):
+                last_error = AIError(
+                    ErrorCategory.UNSUPPORTED_CAPABILITY,
+                    f"Provider '{entry.provider}' is not a speech provider.",
+                    provider=entry.provider,
+                    model=entry.id,
+                    task=task,
+                    retryable=False,
+                )
+                attempts.append(
+                    Attempt(
+                        entry.provider,
+                        entry.id,
+                        False,
+                        last_error.category.value,
+                        last_error.message,
+                    )
+                )
+                if provider or model:
+                    raise last_error
+                continue
+            if not provider_obj.supports_prepared_chunks:
+                last_error = AIError(
+                    ErrorCategory.UNSUPPORTED_CAPABILITY,
+                    f"Provider '{entry.provider}' cannot transcribe an externally prepared "
+                    "audio chunk safely.",
+                    provider=entry.provider,
+                    model=entry.id,
+                    task=task,
+                    retryable=False,
+                    details={"reason": "prepared_chunks_unsupported"},
+                )
+                attempts.append(
+                    Attempt(
+                        entry.provider,
+                        entry.id,
+                        False,
+                        last_error.category.value,
+                        last_error.message,
+                    )
+                )
+                if provider or model:
+                    raise last_error
+                continue
+
+            available, reason = provider_obj.available()
+            if not available:
+                last_error = _availability_error(entry.provider, reason, self.registry)
+                attempts.append(
+                    Attempt(
+                        entry.provider,
+                        entry.id,
+                        False,
+                        last_error.category.value,
+                        last_error.message,
+                    )
+                )
+                if provider or model:
+                    raise last_error
+                continue
+
+            try:
+                result = self._run_speech_candidate(
+                    entry,
+                    task=task,
+                    attempts=attempts,
+                    config=provider_obj.config,
+                    call=partial(
+                        provider_obj.transcribe_chunk,
+                        entry,
+                        chunk,
+                        language=language,
+                        word_timestamps=word_timestamps,
+                        prompt=prompt,
+                    ),
+                )
+            except AIError as exc:
+                last_error = exc
+                if exc.category == ErrorCategory.FREE_QUOTA_EXHAUSTED:
+                    self._block_provider_quota(entry.provider, exc)
+                    if entry.underlying_provider:
+                        self._block_provider_quota(entry.underlying_provider, exc)
+                self._record_provider_event(
+                    entry.provider,
+                    success=False,
+                    category=exc.category.value,
+                    retry_after_seconds=exc.retry_after,
+                )
+                if index == len(routing.candidates) - 1 or not self.policy.can_fallback(exc):
+                    raise
+                logger.warning(
+                    "Falling back after %s from %s/%s for chunk %s",
+                    exc.category.value,
+                    entry.provider,
+                    entry.id,
+                    chunk.index,
+                )
+                continue
+            execution = SpeechExecution(
+                task=task,
+                provider=entry.provider,
+                model=entry.id,
+                result=result,
+                attempts=attempts,
+                used_fallback=index > 0,
+            )
+            self._record_provider_event(entry.provider, success=True)
+            return {
+                "task": task,
+                "provider": execution.provider,
+                "model": execution.model,
+                "used_fallback": execution.used_fallback,
+                "transcript": result.model_dump(mode="json"),
+                "attempts": [attempt.__dict__ for attempt in execution.attempts],
+            }
+
+        raise last_error or _no_candidate_error(routing, task)
+
     def transcribe(
         self,
         audio_path: Path | str,
@@ -698,6 +1080,31 @@ class ProviderManager:
 
         for index, candidate in enumerate(routing.candidates):
             entry = candidate.entry
+            blocking_provider, cooldown = self._candidate_cooldown(entry)
+            if cooldown > 0:
+                last_error = AIError(
+                    ErrorCategory.FREE_QUOTA_EXHAUSTED,
+                    f"Provider '{blocking_provider}' is cooling down after free-quota "
+                    f"exhaustion; retry in about {math.ceil(cooldown)}s.",
+                    provider=entry.provider,
+                    model=entry.id,
+                    task=task,
+                    retryable=False,
+                    retry_after=cooldown,
+                )
+                attempts.append(
+                    Attempt(
+                        entry.provider,
+                        entry.id,
+                        False,
+                        last_error.category.value,
+                        last_error.message,
+                    )
+                )
+                if provider or model:
+                    raise last_error
+                continue
+
             provider_obj = self.providers.get(entry.provider)
             if not isinstance(provider_obj, BaseSpeechProvider):
                 last_error = AIError(
@@ -708,7 +1115,15 @@ class ProviderManager:
                     task=task,
                     retryable=False,
                 )
-                attempts.append(Attempt(entry.provider, entry.id, False, last_error.category.value, last_error.message))
+                attempts.append(
+                    Attempt(
+                        entry.provider,
+                        entry.id,
+                        False,
+                        last_error.category.value,
+                        last_error.message,
+                    )
+                )
                 if not self.policy.can_fallback(last_error):
                     raise last_error
                 continue
@@ -716,7 +1131,15 @@ class ProviderManager:
             available, reason = provider_obj.available()
             if not available:
                 last_error = _availability_error(entry.provider, reason, self.registry)
-                attempts.append(Attempt(entry.provider, entry.id, False, last_error.category.value, last_error.message))
+                attempts.append(
+                    Attempt(
+                        entry.provider,
+                        entry.id,
+                        False,
+                        last_error.category.value,
+                        last_error.message,
+                    )
+                )
                 if provider or model:
                     raise last_error
                 continue
@@ -724,16 +1147,30 @@ class ProviderManager:
             try:
                 result = self._run_speech_candidate(
                     entry,
-                    provider_obj,
-                    Path(audio_path),
                     task=task,
-                    language=language,
-                    word_timestamps=word_timestamps,
-                    prompt=prompt,
                     attempts=attempts,
+                    config=provider_obj.config,
+                    call=partial(
+                        provider_obj.transcribe,
+                        entry,
+                        Path(audio_path),
+                        language=language,
+                        word_timestamps=word_timestamps,
+                        prompt=prompt,
+                    ),
                 )
             except AIError as exc:
                 last_error = exc
+                if exc.category == ErrorCategory.FREE_QUOTA_EXHAUSTED:
+                    self._block_provider_quota(entry.provider, exc)
+                    if entry.underlying_provider:
+                        self._block_provider_quota(entry.underlying_provider, exc)
+                self._record_provider_event(
+                    entry.provider,
+                    success=False,
+                    category=exc.category.value,
+                    retry_after_seconds=exc.retry_after,
+                )
                 if index == len(routing.candidates) - 1 or not self.policy.can_fallback(exc):
                     raise
                 logger.warning(
@@ -748,6 +1185,7 @@ class ProviderManager:
                 attempts=attempts,
                 used_fallback=index > 0,
             )
+            self._record_provider_event(entry.provider, success=True)
             return {
                 "task": task,
                 "provider": execution.provider,
@@ -762,16 +1200,12 @@ class ProviderManager:
     def _run_speech_candidate(
         self,
         entry: ModelEntry,
-        provider: BaseSpeechProvider,
-        audio_path: Path,
         *,
         task: str,
-        language: str | None,
-        word_timestamps: bool,
-        prompt: str | None,
         attempts: list[Attempt],
+        config: Any,
+        call: Callable[..., TranscriptResult],
     ) -> TranscriptResult:
-        config = provider.config
         max_retries = (
             config.max_retries if config.max_retries is not None else self.settings.max_retries
         )
@@ -788,14 +1222,7 @@ class ProviderManager:
             started = time.perf_counter()
             try:
                 self.policy.assert_free(entry)
-                result = provider.transcribe(
-                    entry,
-                    audio_path,
-                    language=language,
-                    word_timestamps=word_timestamps,
-                    prompt=prompt,
-                    timeout=config.timeout_seconds or self.settings.timeout_seconds,
-                )
+                result = call(timeout=config.timeout_seconds or self.settings.timeout_seconds)
             except AIError as exc:
                 latency_ms = int((time.perf_counter() - started) * 1000)
                 self._record(
@@ -809,7 +1236,9 @@ class ProviderManager:
                     latency_ms=latency_ms,
                 )
                 attempts.append(
-                    Attempt(entry.provider, entry.id, False, exc.category.value, exc.message, latency_ms)
+                    Attempt(
+                        entry.provider, entry.id, False, exc.category.value, exc.message, latency_ms
+                    )
                 )
                 if exc.category == ErrorCategory.FREE_QUOTA_EXHAUSTED:
                     raise
@@ -844,6 +1273,73 @@ class ProviderManager:
             return result
 
     # ------------------------------------------------------------------ free verify
+    def discover_nvidia_models(self, *, force: bool = False) -> dict[str, Any]:
+        """Discover NVIDIA Free Endpoint models from structured catalog metadata."""
+        if self.registry.get_provider("nvidia") is None:
+            raise AIError(
+                ErrorCategory.INVALID_REQUEST,
+                "NVIDIA provider is not configured.",
+                retryable=False,
+            )
+        try:
+            summary = nvidia_catalog.discover(self.settings.config_dir, force=force)
+        except nvidia_catalog.NvidiaCatalogError as exc:
+            cached = nvidia_catalog.load_cache(self.settings.config_dir)
+            return {
+                "ok": False,
+                "cached": cached is not None,
+                "models": len(cached.get("models") or []) if cached else 0,
+                "updated_at": cached.get("updated_at") if cached else None,
+                "stats": cached.get("stats") if cached else {},
+                "error": str(exc),
+            }
+        self.reload()
+        return summary
+
+    def _record_nvidia_verification(self, entry: ModelEntry, result: ConnectionResult) -> None:
+        if entry.provider != "nvidia":
+            return
+        category = str((result.details or {}).get("category") or "")
+        if result.ok:
+            self.registry.update_verification(
+                entry.id,
+                free_verified=True,
+                verification_source=nvidia_catalog.CATALOG_SOURCE,
+                api_available=True,
+                verification_status="verified",
+                verification_message="NVIDIA endpoint responded to a bounded smoke test.",
+            )
+            return
+        if category in {
+            ErrorCategory.MODEL_UNAVAILABLE.value,
+            ErrorCategory.UNSUPPORTED_CAPABILITY.value,
+            ErrorCategory.INVALID_RESPONSE.value,
+        }:
+            self.registry.update_verification(
+                entry.id,
+                free_verified=False,
+                verification_source=nvidia_catalog.CATALOG_SOURCE,
+                api_available=False,
+                verification_status="unavailable",
+                verification_message=result.message,
+            )
+            return
+        if category in {
+            ErrorCategory.FREE_QUOTA_EXHAUSTED.value,
+            ErrorCategory.RATE_LIMIT_EXCEEDED.value,
+        }:
+            message = f"Endpoint is callable but currently rate limited: {result.message}"
+        else:
+            message = result.message
+        self.registry.update_verification(
+            entry.id,
+            free_verified=False,
+            verification_source=nvidia_catalog.CATALOG_SOURCE,
+            api_available="unknown",
+            verification_status="unverified",
+            verification_message=message,
+        )
+
     def verify_free(self, model_id: str) -> dict[str, Any]:
         entry = self.registry.get_model(model_id)
         if entry is None:
@@ -852,6 +1348,8 @@ class ProviderManager:
                 f"Unknown model '{model_id}'.",
                 retryable=False,
             )
+        if entry.provider == "nvidia":
+            return self._verify_nvidia(entry)
         if entry.provider != "openrouter":
             return {
                 "model": entry.id,
@@ -861,6 +1359,61 @@ class ProviderManager:
                 "Gemini and Groq free eligibility is verified against their pricing pages manually.",
             }
         return self._verify_openrouter(entry)
+
+    def _verify_nvidia(self, entry: ModelEntry) -> dict[str, Any]:
+        if entry.access_type != "free_endpoint":
+            self.registry.update_verification(
+                entry.id,
+                free=True,
+                free_verified=False,
+                verification_source=nvidia_catalog.CATALOG_SOURCE,
+                verification_status="failed",
+                verification_message="NVIDIA catalog does not list this as a Free Endpoint.",
+            )
+            return {
+                "model": entry.id,
+                "verified": False,
+                "supported": True,
+                "reason": "NVIDIA catalog does not list this model as a Free Endpoint.",
+            }
+        if entry.api_available is False:
+            return {
+                "model": entry.id,
+                "verified": False,
+                "supported": True,
+                "reason": entry.verification_message
+                or "Model is not listed by NVIDIA's public API catalog.",
+            }
+
+        provider = self.providers.get("nvidia")
+        if provider is None:
+            return {
+                "model": entry.id,
+                "verified": False,
+                "supported": True,
+                "reason": "NVIDIA provider adapter is not available.",
+            }
+        available, reason = provider.available()
+        if not available:
+            return {
+                "model": entry.id,
+                "verified": False,
+                "supported": True,
+                "reason": f"Bounded NVIDIA smoke test was not run: {reason}",
+            }
+
+        result = provider.test_connection(entry)
+        self._health["nvidia"] = result
+        self._record_nvidia_verification(entry, result)
+        updated = self.registry.require_model(entry.id)
+        return {
+            "model": updated.id,
+            "verified": updated.free_verified,
+            "supported": True,
+            "api_available": updated.api_available,
+            "verification_status": updated.verification_status,
+            "reason": updated.verification_message or result.message,
+        }
 
     def _verify_openrouter(self, entry: ModelEntry) -> dict[str, Any]:
         import httpx
@@ -1056,9 +1609,7 @@ class ProviderManager:
         except Exception:  # pragma: no cover - usage must never break requests
             logger.exception("Failed to record usage event")
 
-    def _raise_if_no_candidates(
-        self, routing: RoutingResult, task: str, *, explicit: bool
-    ) -> None:
+    def _raise_if_no_candidates(self, routing: RoutingResult, task: str, *, explicit: bool) -> None:
         if routing.candidates:
             return
         if explicit:
@@ -1077,7 +1628,7 @@ class ProviderManager:
 
 # ---------------------------------------------------------------------- utilities
 def _capabilities_for_type(provider_type: str) -> list[str]:
-    if provider_type == "litellm":
+    if provider_type in ("litellm", "openai_compatible"):
         return ["text"]
     if provider_type in ("groq_speech", "whisper_cpp"):
         return ["speech_to_text"]

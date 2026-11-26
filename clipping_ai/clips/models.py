@@ -45,6 +45,29 @@ class ClipStage(StrEnum):
     CANCELLED = "cancelled"
 
 
+class ClipMetadataStatus(StrEnum):
+    PENDING = "pending"
+    GENERATED = "generated"
+    LOCAL_FALLBACK = "local_fallback"
+    DEFERRED_QUOTA = "deferred_quota"
+    FAILED = "failed"
+    MANUALLY_EDITED = "manually_edited"
+
+
+class ClipRange(BaseModel):
+    model_config = ConfigDict(extra="ignore", allow_inf_nan=False)
+
+    highlight_index: int = Field(ge=0)
+    start_time: float = Field(ge=0)
+    end_time: float = Field(gt=0)
+
+    @model_validator(mode="after")
+    def _end_after_start(self) -> ClipRange:
+        if self.end_time <= self.start_time:
+            raise ValueError("end_time must be greater than start_time")
+        return self
+
+
 class ClipJob(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -70,6 +93,20 @@ class ClipJob(BaseModel):
     progress: float = Field(default=0.0, ge=0.0, le=1.0)
     error: dict[str, Any] | None = None
     cancel_requested: bool = False
+    title: str | None = None
+    description: str | None = None
+    hashtags: list[str] = Field(default_factory=list)
+    metadata_language: str | None = None
+    visual_settings: dict[str, Any] = Field(default_factory=dict)
+    metadata_status: ClipMetadataStatus | None = None
+    metadata_error: str | None = None
+    metadata_provider: str | None = None
+    metadata_model: str | None = None
+    metadata_at: str | None = None
+    metadata_edited_at: str | None = None
+    published: bool = False
+    published_at: str | None = None
+    deleted_at: str | None = None
     created_at: str
     updated_at: str
     started_at: str | None = None
@@ -97,6 +134,15 @@ class ClipJob(BaseModel):
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump(mode="json")
 
+    def public_dict(self) -> dict[str, Any]:
+        return self.model_dump(
+            mode="json",
+            exclude={"caption_path", "output_path"},
+        )
+
+    def display_title(self) -> str:
+        return self.title or f"Clip {self.id[:8]}"
+
     def status_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
@@ -119,6 +165,13 @@ class ClipJob(BaseModel):
             "error": self.error,
             "cancel_requested": self.cancel_requested,
             "size_bytes": self.size_bytes,
+            "visual_settings": self.visual_settings,
+            "metadata_status": (
+                self.metadata_status.value if self.metadata_status is not None else None
+            ),
+            "metadata_error": self.metadata_error,
+            "published": self.published,
+            "deleted_at": self.deleted_at,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "started_at": self.started_at,

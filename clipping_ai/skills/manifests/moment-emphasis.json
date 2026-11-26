@@ -1,0 +1,12 @@
+{
+  "id": "moment-emphasis",
+  "name": "Important Moment Emphasis",
+  "version": "1.0.0",
+  "category": "visual",
+  "description": "Selects restrained zoom, punch and emphasis effects around important words using existing clip analysis.",
+  "instructions": "Use at most two visual events per clip. Reduce intensity for high-motion footage. Never add synthetic footage, voices or music.",
+  "tools": ["composition.moment_plan"],
+  "permissions": {"network": false, "filesystem": false, "subprocess": false},
+  "timeout_seconds": 20,
+  "enabled_by_default": true
+}

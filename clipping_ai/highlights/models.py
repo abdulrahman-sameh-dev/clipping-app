@@ -141,3 +141,17 @@ class HighlightResult(BaseModel):
     classification: MediaClassification | None = None
     method: str = "deterministic"
     notes: list[str] = Field(default_factory=list)
+
+
+class LlmOutcome(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    highlights: list[Highlight] = Field(default_factory=list)
+    error: str | None = None
+    response_data: dict[str, Any] | None = None
+    provider: str | None = None
+    model: str | None = None
+    applied: bool = False
+    failed: bool = False
+    retryable: bool = False
+    retry_after: float | None = None

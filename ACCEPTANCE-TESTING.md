@@ -326,6 +326,24 @@ curl -s -o /tmp/opencode/cliping-acceptance/api/download.mp4 \
 `render:true` is synchronous and may block for the full FFmpeg render. Use
 `render:false` or the CLI `--queue` path to exercise the background worker.
 
+### Metadata, publishing, and trash
+
+After a clip reaches `ready`:
+
+```bash
+curl -s -X PATCH -H 'Content-Type: application/json'   -d '{"title":"Edited title","description":"Edited description","hashtags":["#shorts"],"language":"en"}'   http://127.0.0.1:8766/api/clip-jobs/<clip_id>/metadata
+curl -s -X POST -H 'Content-Type: application/json' -d '{"force":true}'   http://127.0.0.1:8766/api/clip-jobs/<clip_id>/metadata/regenerate
+curl -s -X POST -H 'Content-Type: application/json' -d '{"published":true}'   http://127.0.0.1:8766/api/clip-jobs/<clip_id>/publish
+curl -s -X DELETE http://127.0.0.1:8766/api/clip-jobs/<clip_id>
+curl -s http://127.0.0.1:8766/api/trash
+curl -s -X POST -H 'Content-Type: application/json'   -d '{"items":[{"kind":"clip","id":"<clip_id>"}]}'   http://127.0.0.1:8766/api/trash/restore
+```
+
+Verify manual edits survive a reload and are marked `manually_edited`; regeneration
+requires `force:true` to overwrite them. Publishing sets `published_at`. Soft delete
+removes the item from active lists but keeps it in `/api/trash`. Source deletion must
+not remove rendered clips. Permanent deletion only succeeds for trashed items.
+
 ### API error cases
 
 ```bash
@@ -360,7 +378,11 @@ media and logs under `/tmp/opencode/cliping-acceptance/` are disposable.
 | Captions | ASS exists, font is appropriate, pixels are burned in, Arabic RTL pixel order is correct, background box is visible |
 | Effects | Diagnostics exist; real frame measurements show non-zero zoom/punch scaling |
 | Provider health | whisper.cpp reports a precise status without attempting a download |
-| API | All smoke endpoints return `200`; upload/transcribe/highlights/clip/download work |
+| Metadata | Generated fields use clip context; manual edits are protected; failures are recorded without failing the render |
+| Publishing | Manual checkbox state and timestamp persist; no upload/OAuth occurs |
+| Deletion | Normal delete is soft; restore works; permanent delete requires trash and respects file ownership |
+| Trash | Mixed source/clip list, restore, purge, and empty work without deleting unrelated clips |
+| API | All smoke endpoints return `200`; upload/transcribe/highlights/clip/metadata/trash/download work |
 | Errors | Invalid input fails clearly; failed jobs are recorded when applicable |
 | Recovery | Interrupted `processing` job recovers and cleans temporary files |
 | Cancellation | Queued clip cancels and retries successfully |
@@ -382,3 +404,8 @@ media and logs under `/tmp/opencode/cliping-acceptance/` are disposable.
 - No real podcast/interview or gaming sample was available. Those categories are
   covered by unit fixtures and must not be reported as end-to-end verified.
 - `yt-dlp` is a Python dependency; a separate `yt-dlp` binary is not required.
+- Publishing is a local manual status only; no YouTube/Facebook upload, OAuth,
+  scheduling, or analytics is implemented.
+- Trash has no automatic expiry. Permanent deletion is explicit and irreversible.
+- Subjective visual/interaction review of clip detail, metadata forms, publishing,
+  and Trash at desktop/mobile widths remains a human task.

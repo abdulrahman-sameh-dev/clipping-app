@@ -29,6 +29,13 @@ uv run ruff check clipping_ai tests
 uv run mypy clipping_ai
 ```
 
+Frontend polling behavior is covered by Node's built-in test runner (no install
+needed):
+
+```bash
+npm run test:frontend
+```
+
 Frontend smoke tests use Playwright and a temporary local backend:
 
 ```bash
@@ -41,7 +48,8 @@ The Playwright script starts its own `clipping-ai serve` process on a free loopb
 port with a temporary data directory. Set `STUDIO_BASE_URL` to target an already
 running instance, or `PLAYWRIGHT_CHROMIUM_EXECUTABLE` to use a specific Chromium
 binary. The smoke test covers routing, language/RTL switching, dialogs, empty states,
-mobile navigation, and browser console/page errors.
+mobile navigation, browser console/page errors, and verifies an idle Clips page does
+not keep polling clip jobs.
 
 `-m live` runs optional real-provider tests. They are skipped unless explicitly
 enabled:
@@ -73,12 +81,19 @@ contain usable segment timestamps.
 - `tests/test_providers.py`: Groq speech parsing/chunking/cache, whisper.cpp parsing,
   and whisper.cpp health states (`not_installed`, `model_missing`, `ready`,
   `misconfigured`, `disabled`, execution `error`).
+- `tests/test_skills_composition.py`: visual settings defaults/scaling, effect
+  capping, callout generation, Arabic ASS overlay rendering, OpenAI-compatible
+  gateway requests/availability, external skill review/enable, permission and
+  timeout enforcement, provider toggle persistence, and skills API routes.
 - `tests/test_errors.py`: provider exception mapping, retry parsing, secret redaction.
 - `tests/test_throttle.py`: local rate/interval throttling and limit errors.
 - `tests/test_audio.py`: hashing, ffmpeg chunk splitting (skipped if ffmpeg is absent).
 - `tests/test_api.py`: FastAPI endpoints and error-to-HTTP mapping.
 - `tests/test_frontend.py`: packaged studio mount, root redirect, index shell, static
-  assets, and missing-asset behavior.
+  assets, missing-asset behavior, and static integration of clip detail, metadata,
+  publishing, selection, delete, trash routes, and scoped polling.
+- `tests/frontend/polling.test.mjs`: active/idle polling, visibility pause/resume,
+  overlap prevention, cleanup/abort, and failure backoff.
 - `tests/test_registry.py`: real config loading, settings including relative storage
   path resolution, free verification persistence.
 - `tests/test_cli.py`: CLI parser and JSON output.
@@ -118,6 +133,14 @@ contain usable segment timestamps.
   Arabic tests verify right-to-left word order and the caption background box; a
   synthetic FFmpeg render measures actual foreground scaling so zoom and punch cannot
   regress into configuration-only no-ops.
+- `tests/test_metadata_trash.py`: metadata generation, manual-edit protection,
+  regeneration, publishing timestamps, deleted-state guards, source/clip soft delete,
+  restore, permanent deletion and file ownership, unified trash list/restore/empty,
+  metadata/trash/delete API responses, and target-aware long-highlight splitting.
+- `tests/test_metadata_reliability.py`: batch response mapping by clip ID,
+  idempotency, recursive batch splitting, omitted-item local fallback, quota fallback
+  without raising, no-transcript failure, manual-edit preservation, source publish
+  completion/timestamps/counts, reset on new clips, and trash/restore persistence.
 - `tests/test_clips_cli.py`: clip CLI parsing, queued rendering, JSON/human output,
   retry/cancel, and config output.
 - `tests/test_live.py`: optional real-provider smoke tests.
@@ -127,9 +150,18 @@ contain usable segment timestamps.
 ## Key invariants covered
 
 - A paid model cannot execute even when explicitly requested.
+- A gateway model without an explicit `base_url` or key remains unavailable, and
+  gateway requests use the configured endpoint and bearer key.
+- External skills stay disabled until reviewed; unknown tools and missing declared
+  permissions are rejected; tool timeouts become bounded errors.
+- Visual settings disable effects independently from captions, intensity scales and
+  caps effects, and callouts use libass-compatible Arabic ASS.
 - A paid model cannot be reached by fallback.
-- Quota exhaustion does not trigger fallback by default.
+- Free-quota exhaustion falls back to another approved free model, blocks the
+  exhausted provider for its cooldown, and never reaches paid models.
 - Rate limits can fall back to another approved free model.
+- Batch metadata is mapped only by clip ID; failures split, then local fallback keeps
+  generation non-blocking.
 - Missing keys produce `missing_api_key`, not a crash or paid request.
 - Structured output is validated with Pydantic and repaired with bounded retries.
 - Usage is recorded locally and does not claim to be provider quota truth.
@@ -156,6 +188,9 @@ contain usable segment timestamps.
 - Standalone `highlights` and full `analyze` use the same semantic consolidation.
 - Maximum-highlight truncation keeps the highest-confidence highlights, not merely the
   earliest ones.
+- The preferred 30-45s target is soft: long moments split only at transcript
+  boundaries, preserve original timestamps/coverage, and within-target moments remain
+  unchanged.
 - LLM highlight refinement is optional; invalid or failed refinement falls back to
   deterministic candidates.
 - Analysis continues with signal-only highlights when transcription fails.
@@ -186,6 +221,18 @@ contain usable segment timestamps.
 - Failed renders remove incomplete `.part.mp4` files without deleting unrelated job
   artifacts, and a retry can complete successfully.
 - Concurrent clip exports use separate per-job directories.
+- Metadata is generated only from clip-range transcript/highlight context, never by
+  re-transcribing or re-analysing the original media.
+- Metadata provider failures are recorded on the clip without failing the render.
+- Manual metadata edits are marked `manually_edited` and cannot be overwritten without
+  explicit force; clip and source publishing are manual and store timestamps.
+- Source publish completion clears on uncheck, persists through refresh/trash/restore,
+  reports published/total counts, and resets when new clips are created.
+- Normal deletion is soft; permanent deletion requires trash and only removes files
+  owned by that source or clip.
+- Deleting a source never deletes its rendered clips. Trashed items can be restored
+  or purged individually, in batches, or by emptying trash.
+- API job responses expose public fields without internal filesystem paths.
 - Original source video and speaker audio are never replaced or synthesised.
 - The packaged frontend is served by FastAPI at `/ui/`; `/` redirects there.
 - The studio switches English/Arabic direction and survives mobile navigation.
@@ -238,3 +285,21 @@ To configure the local provider, set `config/providers.json`:
 Then add or enable a matching `whisper_cpp` model in `config/models.json` with
 `tasks: ["transcription"]`, `free: true`, and `status: "enabled"`. The binary and
 model paths are local machine settings; do not commit them.
+
+
+## NVIDIA catalog discovery
+
+Deterministic tests in `tests/test_nvidia_catalog.py` cover structured Free Endpoint
+classification, partner/download exclusion, API-list matching, cache reuse, registry
+merge, policy blocking, dynamic routing, and bounded smoke-test verification. No test
+uses a live NVIDIA inference request.
+
+Live catalog-only refresh:
+
+```bash
+uv run python - <<'PY'
+from pathlib import Path
+from clipping_ai.providers import nvidia_catalog
+print(nvidia_catalog.discover(Path("config"), force=True))
+PY
+```

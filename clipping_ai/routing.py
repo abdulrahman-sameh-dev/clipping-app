@@ -47,7 +47,9 @@ class Router:
         result = RoutingResult()
 
         if provider or model:
-            raw_candidates = self._explicit_candidates(task, provider=provider, model=model, result=result)
+            raw_candidates = self._explicit_candidates(
+                task, provider=provider, model=model, result=result
+            )
         else:
             raw_candidates = self._routed_candidates(task, result=result)
 
@@ -110,18 +112,36 @@ class Router:
             result.candidates = result.candidates[:limit]
         return result
 
-    def _routed_candidates(
-        self, task: str, *, result: RoutingResult
-    ) -> list[tuple[str, str]]:
+    def _routed_candidates(self, task: str, *, result: RoutingResult) -> list[tuple[str, str]]:
         routed = self.registry.candidates_for_task(task)
-        if not routed:
+        candidates = [(c.provider, c.model) for c in routed]
+        seen = set(candidates)
+
+        nvidia = self.registry.get_provider("nvidia")
+        if nvidia is not None and nvidia.enabled:
+            for entry in self.registry.models_for_provider("nvidia"):
+                if not entry.discovered or entry.access_type != "free_endpoint":
+                    continue
+                if not entry.is_enabled() or not entry.supports_task(task):
+                    continue
+                if entry.api_available is False or entry.verification_status in (
+                    "failed",
+                    "unavailable",
+                ):
+                    continue
+                candidate = (entry.provider, entry.id)
+                if candidate not in seen:
+                    seen.add(candidate)
+                    candidates.append(candidate)
+
+        if not candidates:
             result.add_skip(
                 "*",
                 "*",
                 f"no routing configured for task '{task}'",
                 ErrorCategory.INVALID_REQUEST,
             )
-        return [(c.provider, c.model) for c in routed]
+        return candidates
 
     def _explicit_candidates(
         self,

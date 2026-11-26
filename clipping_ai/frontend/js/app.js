@@ -1,5 +1,7 @@
 import { api } from "./api.js";
 import { getLocale, t, toggleLocale } from "./i18n.js";
+import { createPoller } from "./polling.js";
+import { createTrimEditor } from "./trim-editor.js";
 import * as ui from "./ui.js";
 
 const main = document.getElementById("main");
@@ -16,6 +18,7 @@ const state = {
   selection: new Map(),
   videoCache: new Map(),
   system: null,
+  trimEditor: null,
 };
 
 const PROVIDER_STATUS_KEYS = {
@@ -146,7 +149,10 @@ function parseRoute() {
   if (root === "library") return { name: "library", params };
   if (root === "jobs") return { name: "jobs", params };
   if (root === "clips") return { name: "clips", params };
+  if (root === "clip" && id) return { name: "clip", id, params };
+  if (root === "trash") return { name: "trash", params };
   if (root === "providers") return { name: "providers", params };
+  if (root === "skills") return { name: "skills", params };
   if (root === "video" && id && sub === "export") return { name: "export", id, params };
   if (root === "video" && id) return { name: "analysis", id, params };
   return { name: "notfound", params };
@@ -191,7 +197,11 @@ function cleanup() {
 
 function updateNavigation(route) {
   const active =
-    route.name === "analysis" || route.name === "export" ? "library" : route.name;
+    route.name === "analysis" || route.name === "export"
+      ? "library"
+      : route.name === "clip"
+        ? "clips"
+        : route.name;
   document.querySelectorAll(".nav-link").forEach((link) => {
     const isActive = link.dataset.nav === active;
     link.classList.toggle("is-active", isActive);
@@ -205,7 +215,12 @@ function updateBreadcrumb(route) {
   if (route.name === "library") items.push({ label: t("nav.library") });
   else if (route.name === "jobs") items.push({ label: t("nav.jobs") });
   else if (route.name === "clips") items.push({ label: t("nav.clips") });
+  else if (route.name === "clip") {
+    items.push({ label: t("nav.clips"), href: "#/clips" });
+    items.push({ label: t("clips.detailContext") });
+  } else if (route.name === "trash") items.push({ label: t("nav.trash") });
   else if (route.name === "providers") items.push({ label: t("nav.providers") });
+  else if (route.name === "skills") items.push({ label: t("nav.skills") });
   else if (route.name === "analysis") {
     items.push({ label: t("nav.library"), href: "#/library" });
     items.push({ label: t("analysis.context") });
@@ -243,10 +258,16 @@ async function createView(route, token) {
       return exportView(route, token);
     case "clips":
       return clipsView(token);
+    case "clip":
+      return clipDetailView(route, token);
+    case "trash":
+      return trashView(token);
     case "jobs":
       return jobsView(token);
     case "providers":
       return providersView(token);
+    case "skills":
+      return skillsView(token);
     default:
       return {
         title: t("error.notFound"),
@@ -283,22 +304,39 @@ function primaryActions() {
     </button>`;
 }
 
-function startPolling(callback, interval, token) {
-  let running = false;
-  const tick = async () => {
-    if (state.token !== token || running || document.hidden) return;
-    running = true;
-    try {
-      await callback();
-    } catch (error) {
+function startPolling(
+  callback,
+  { interval = 4000, token = state.token, isActive = () => true, idleInterval = null } = {},
+) {
+  const poller = createPoller({
+    callback: async (context) => {
+      if (state.token !== token) {
+        poller.stop();
+        return;
+      }
+      await callback(context);
+    },
+    interval,
+    idleInterval,
+    isActive,
+    onError: (error) => {
       if (state.token === token) console.error(error);
-    } finally {
-      running = false;
-    }
-  };
-  const timer = window.setInterval(tick, interval);
-  state.cleanup.push(() => window.clearInterval(timer));
-  return tick;
+    },
+  });
+  state.cleanup.push(() => poller.stop());
+  return poller;
+}
+
+function isJobActive(job) {
+  return job?.status === "queued" || job?.status === "processing";
+}
+
+function isClipActive(clip) {
+  return isJobActive(clip) || clip?.metadata_status === "pending";
+}
+
+function sameJson(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function canRetryVideo(job) {
@@ -346,10 +384,42 @@ function highlightFor(clip, sourceJob = sourceJobFor(clip)) {
 }
 
 function clipTitle(clip, sourceJob = sourceJobFor(clip)) {
+  if (clip?.title) return clip.title;
   const highlight = highlightFor(clip, sourceJob);
   if (highlight?.title) return highlight.title;
   const number = (clip?.highlight_index ?? 0) + 1;
   return `${t("common.clip")} ${number}`;
+}
+
+function clipDetailHref(clip) {
+  return `#/clip/${encodeURIComponent(clip.id)}`;
+}
+
+function metadataStatusLabel(status) {
+  if (!status) return t("clips.metadataNone");
+  return t(`clips.metadata_${status}`);
+}
+
+function clipPublishBadge(clip) {
+  return clip.published
+    ? `<span class="tag is-teal">${ui.icon("check")}${ui.esc(t("clips.published"))}</span>`
+    : `<span class="tag">${ui.esc(t("clips.unpublished"))}</span>`;
+}
+
+function clipDate(clip) {
+  return clip.completed_at || clip.updated_at || clip.created_at;
+}
+
+function clipPublicMeta(clip) {
+  return [
+    formatName(clip.format),
+    ui.formatDuration(clip.duration),
+    qualityName(clip.quality),
+    clip.captions ? t("common.captions") : null,
+    clipDate(clip) ? ui.formatDateTimeLabel(clipDate(clip)) : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 function clipMeta(clip) {
@@ -371,6 +441,39 @@ function highlightExcerpt(highlight) {
     return highlight.transcript_segments.map((segment) => segment.text).join(" ");
   }
   return highlight.selection_reason || "";
+}
+
+function exportHighlightRow(
+  highlight,
+  index,
+  { summary = false, checked = true, active = false, range = null, custom = false } = {},
+) {
+  const start = Number(range?.start ?? highlight.start_time ?? 0);
+  const end = Number(range?.end ?? highlight.end_time ?? start);
+  const id = summary ? `export-summary-highlight-${index}` : `export-highlight-${index}`;
+  const meta = [highlight.category, custom ? t("trim.custom") : ""]
+    .filter(Boolean)
+    .join(" · ");
+  const input = summary
+    ? `<input type="checkbox" id="${id}" data-summary-highlight="${index}" ${
+        checked ? "checked" : ""
+      } />`
+    : `<input type="checkbox" id="${id}" name="highlight" value="${index}" ${
+        checked ? "checked" : ""
+      } />`;
+  return `<div class="selected-highlight ${active ? "is-active" : ""} ${
+    custom ? "is-custom" : ""
+  }" data-trim-row="${index}">
+    ${input}
+    <label class="selected-highlight-copy" for="${id}">
+      <strong>${ui.esc(highlight.title)}</strong>
+      ${meta ? `<small>${ui.esc(meta)}</small>` : ""}
+    </label>
+    <span class="duration" dir="ltr">${ui.esc(ui.formatDuration(end - start))}</span>
+    <button class="icon-button trim-row-button" type="button" data-trim-highlight="${index}" aria-pressed="${active}" aria-label="${ui.attr(
+      t("trim.openNamed", { title: highlight.title }),
+    )}" title="${ui.attr(t("trim.open"))}">${ui.icon("sliders")}</button>
+  </div>`;
 }
 
 function selectionFor(jobId, count) {
@@ -398,7 +501,7 @@ function compactProgress(status, progress, stage) {
     <span dir="ltr">${ui.esc(stage ? ui.formatStage(stage) : ui.formatPercent(value))}</span>`;
 }
 
-function jobRow(job) {
+function jobRow(job, { selectable = false, selected = false } = {}) {
   const retry = canRetryVideo(job)
     ? `<button class="icon-button button-small" type="button" data-action="retry-video" data-job-id="${ui.attr(
         job.id,
@@ -413,20 +516,53 @@ function jobRow(job) {
         "cancel",
       )}</button>`
     : "";
+  const checkbox = selectable
+    ? `<label class="row-select" title="${ui.attr(t("common.select"))}"><input type="checkbox" data-select-job="${ui.attr(
+        job.id,
+      )}" ${selected ? "checked" : ""} aria-label="${ui.attr(t("common.select"))}"/></label>`
+    : "";
   return `<div class="job-row" data-job-id="${ui.attr(job.id)}">
     <div class="job-row-main">
-      <a class="job-title" href="#/video/${ui.attr(job.id)}" title="${ui.attr(ui.jobTitle(job))}">${ui.esc(
-        ui.jobTitle(job),
-      )}</a>
-      <div class="job-sub">${ui.esc(ui.jobSubtitle(job))}</div>
+      ${checkbox}
+      <div>
+        <a class="job-title" href="#/video/${ui.attr(job.id)}" title="${ui.attr(ui.jobTitle(job))}">${ui.esc(
+          ui.jobTitle(job),
+        )}</a>
+        <div class="job-sub">${ui.esc(ui.jobSubtitle(job))}</div>
+      </div>
     </div>
     <span class="job-cell" dir="ltr">${
       job.metadata?.duration_seconds ? ui.formatDuration(job.metadata.duration_seconds) : "—"
     }</span>
     <span>${ui.statusPill(job.status)}</span>
+    <div class="job-publish">
+      <label class="source-publish">
+        <input type="checkbox" data-publish-source="${ui.attr(job.id)}" ${
+          job.all_clips_published ? "checked" : ""
+        } aria-label="${ui.attr(t("library.allPublished"))}"/>
+        <span>${ui.esc(
+          job.all_clips_published ? t("library.allPublished") : t("library.notAllPublished"),
+        )}</span>
+      </label>
+      <small>${ui.esc(
+        t("library.publishedCount", {
+          published: ui.formatNumberLabel(job.clip_counts?.published || 0),
+          total: ui.formatNumberLabel(job.clip_counts?.total || 0),
+        }),
+      )}</small>
+    </div>
     <div class="job-row-progress">${compactProgress(job.status, job.progress, job.stage)}</div>
     <div class="job-actions">
       ${retry}${cancel}
+      ${
+        selectable
+          ? `<button class="icon-button button-small" type="button" data-action="delete-video" data-job-id="${ui.attr(
+              job.id,
+            )}" title="${ui.attr(t("common.delete"))}" aria-label="${ui.attr(t("common.delete"))}">${ui.icon(
+              "trash",
+            )}</button>`
+          : ""
+      }
       <a class="row-chevron" href="#/video/${ui.attr(job.id)}" aria-label="${ui.attr(
         t("library.openAnalysis"),
       )}">${ui.icon("chevron")}</a>
@@ -434,7 +570,7 @@ function jobRow(job) {
   </div>`;
 }
 
-function clipCard(clip) {
+function clipCard(clip, { selectable = false, selected = false } = {}) {
   const sourceJob = sourceJobFor(clip);
   const title = clipTitle(clip, sourceJob);
   const downloadUrl = api.clipDownloadUrl(clip.id);
@@ -443,7 +579,15 @@ function clipCard(clip) {
   const media = isReady
     ? `<video src="${downloadUrl}#t=0.1" preload="metadata" muted playsinline aria-hidden="true"></video>`
     : `<div class="clip-media-placeholder">${ui.icon("film")}</div>`;
+  const checkbox = selectable
+    ? `<label class="card-select" title="${ui.attr(t("common.select"))}"><input type="checkbox" data-select-clip="${ui.attr(
+        clip.id,
+      )}" ${selected ? "checked" : ""} aria-label="${ui.attr(t("common.select"))}"/></label>`
+    : "";
   const actions = [
+    `<a class="button button-secondary button-small" href="${clipDetailHref(clip)}">${ui.icon(
+      "sliders",
+    )}<span>${ui.esc(t("clips.openDetail"))}</span></a>`,
     `<button class="button button-secondary button-small" type="button" data-action="preview-clip" data-clip-id="${ui.attr(
       clip.id,
     )}">${ui.icon("play")}<span>${ui.esc(t("clips.preview"))}</span></button>`,
@@ -467,6 +611,9 @@ function clipCard(clip) {
           clip.id,
         )}">${ui.icon("cancel")}<span>${ui.esc(t("clips.cancel"))}</span></button>`
       : "",
+    `<button class="button button-ghost button-small" type="button" data-action="delete-clip" data-clip-id="${ui.attr(
+      clip.id,
+    )}">${ui.icon("trash")}<span>${ui.esc(t("common.delete"))}</span></button>`,
   ]
     .filter(Boolean)
     .join("");
@@ -475,19 +622,27 @@ function clipCard(clip) {
         String(clip.error.message).slice(0, 100),
       )}</p>`
     : "";
-  return `<article class="clip-card" data-clip-id="${ui.attr(clip.id)}">
+  const metadata = clip.metadata_status
+    ? `<span class="tag">${ui.esc(metadataStatusLabel(clip.metadata_status))}</span>`
+    : "";
+  return `<article class="clip-card ${selected ? "is-selected" : ""}" data-clip-id="${ui.attr(clip.id)}">
     <div class="clip-media ${mediaClass}">
       ${media}
+      ${checkbox}
       <div class="clip-media-badges">
         <span>${ui.esc(formatName(clip.format))}</span>
         <span>${clip.captions ? "CC" : ui.esc(qualityName(clip.quality))}</span>
       </div>
     </div>
     <div class="clip-body">
-      <h3>${ui.esc(title)}</h3>
-      <div class="clip-meta">${ui.esc(clipMeta(clip))}</div>
-      <div class="section-title" style="margin:0">
+      <h3><a href="${clipDetailHref(clip)}">${ui.esc(title)}</a></h3>
+      <div class="clip-meta">${ui.esc(clipPublicMeta(clip))}</div>
+      <div class="signal-list compact">
         ${ui.statusPill(clip.status)}
+        ${clipPublishBadge(clip)}
+        ${metadata}
+      </div>
+      <div class="section-title" style="margin:0">
         <a class="text-link small" href="#/video/${ui.attr(clip.source_job_id)}">${ui.esc(
           t("clips.openSource"),
         )}</a>
@@ -507,7 +662,7 @@ function miniClip(clip) {
   const sourceJob = sourceJobFor(clip);
   const title = clipTitle(clip, sourceJob);
   const isReady = clip.status === "ready";
-  return `<a class="mini-clip" href="#/clips" title="${ui.attr(title)}">
+  return `<a class="mini-clip" href="${clipDetailHref(clip)}" title="${ui.attr(title)}">
     <div class="mini-media">
       ${
         isReady
@@ -521,16 +676,16 @@ function miniClip(clip) {
   </a>`;
 }
 
-async function loadSourceJobs(clips) {
+async function loadSourceJobs(clips, signal) {
   const ids = [...new Set(clips.map((clip) => clip.source_job_id).filter(Boolean))];
   const missing = ids.filter((id) => !state.videoCache.has(id)).slice(0, 30);
   await Promise.allSettled(
     missing.map(async (id) => {
       try {
-        const job = await api.getVideoJob(id);
+        const job = await api.getVideoJob(id, { signal });
         state.videoCache.set(id, job);
-      } catch {
-        state.videoCache.set(id, null);
+      } catch (error) {
+        if (error?.name !== "AbortError") state.videoCache.set(id, null);
       }
     }),
   );
@@ -786,24 +941,23 @@ async function dashboardView(token) {
     title: t("dashboard.title"),
     html,
     mount() {
-      startPolling(async () => {
-        if (state.token !== token) return;
-        const [nextStatus, nextJobs, nextClips] = await Promise.allSettled([
-          api.status(false),
-          api.listVideoJobs({ limit: 100 }),
-          api.listClipJobs({ limit: 100 }),
-        ]);
-        const stillActive =
-          (nextJobs.status === "fulfilled" &&
-            (nextJobs.value.jobs || []).some(
-              (job) => job.status === "processing" || job.status === "queued",
-            )) ||
-          (nextClips.status === "fulfilled" &&
-            (nextClips.value.jobs || []).some(
-              (clip) => clip.status === "processing" || clip.status === "queued",
-            ));
-        if (stillActive || nextStatus.status === "rejected") renderRoute();
-      }, 4000, token);
+      const wasActive = jobs.some(isJobActive) || clips.some(isClipActive);
+      startPolling(
+        async ({ signal }) => {
+          const [nextStatus, nextJobs, nextClips] = await Promise.allSettled([
+            api.status(false, { signal }),
+            api.listVideoJobs({ limit: 100 }, { signal }),
+            api.listClipJobs({ limit: 100 }, { signal }),
+          ]);
+          const stillActive =
+            (nextJobs.status === "fulfilled" &&
+              (nextJobs.value.jobs || []).some(isJobActive)) ||
+            (nextClips.status === "fulfilled" &&
+              (nextClips.value.jobs || []).some(isClipActive));
+          if (stillActive || wasActive || nextStatus.status === "rejected") renderRoute();
+        },
+        { interval: 4000, token, isActive: () => wasActive },
+      );
     },
   };
 }
@@ -813,6 +967,7 @@ async function libraryView(token) {
   let jobs = data.jobs || [];
   let filter = "all";
   let searchValue = "";
+  const selected = new Set();
 
   const html = `<div class="page-enter">
     ${pageHead({
@@ -821,14 +976,27 @@ async function libraryView(token) {
       description: t("library.description"),
       actions: primaryActions(),
     })}
-    <div class="toolbar">
+    <div class="toolbar toolbar-wrap">
       <div class="search-field">
         ${ui.icon("search")}
         <input id="library-search" type="search" autocomplete="off" placeholder="${ui.attr(
           t("library.searchPlaceholder"),
         )}" aria-label="${ui.attr(t("common.search"))}" />
       </div>
-      <div class="toolbar-spacer"></div>
+      <div class="toolbar-actions">
+        <button class="button button-ghost button-small" type="button" id="library-select-all">${ui.icon(
+          "check",
+        )}<span>${ui.esc(t("common.selectAll"))}</span></button>
+        <button class="button button-ghost button-small" type="button" id="library-clear">${ui.icon(
+          "cancel",
+        )}<span>${ui.esc(t("common.clear"))}</span></button>
+        <button class="button button-danger button-small" type="button" id="library-delete-selected" disabled>${ui.icon(
+          "trash",
+        )}<span id="library-delete-label">${ui.esc(t("common.delete"))}</span></button>
+        <a class="button button-secondary button-small" href="#/trash">${ui.icon(
+          "trash",
+        )}<span>${ui.esc(t("nav.trash"))}</span></a>
+      </div>
       <span class="small muted" id="library-count"></span>
     </div>
     <div class="filter-row" id="library-filters" role="group" aria-label="${ui.attr(
@@ -839,6 +1007,7 @@ async function libraryView(token) {
         <span>${ui.esc(t("common.video"))}</span>
         <span>${ui.esc(t("common.duration"))}</span>
         <span>${ui.esc(t("common.status"))}</span>
+        <span>${ui.esc(t("library.publishing"))}</span>
         <span>${ui.esc(t("common.progress"))}</span>
         <span style="text-align:end">${ui.esc(t("common.actions"))}</span>
       </div>
@@ -849,7 +1018,11 @@ async function libraryView(token) {
   function filteredJobs() {
     const query = searchValue.trim().toLowerCase();
     return jobs.filter((job) => {
-      if (filter !== "all" && job.status !== filter) return false;
+      if (filter === "completed" && !job.all_clips_published) return false;
+      if (filter === "incomplete" && job.all_clips_published) return false;
+      if (!["all", "completed", "incomplete"].includes(filter) && job.status !== filter) {
+        return false;
+      }
       if (!query) return true;
       return [job.id, job.original_filename, job.source_value, job.metadata?.format_name]
         .filter(Boolean)
@@ -862,17 +1035,37 @@ async function libraryView(token) {
     for (const status of ["ready", "processing", "queued", "failed", "cancelled"]) {
       counts[status] = jobs.filter((job) => job.status === status).length;
     }
+    counts.completed = jobs.filter((job) => job.all_clips_published).length;
+    counts.incomplete = jobs.filter((job) => !job.all_clips_published).length;
     const holder = main.querySelector("#library-filters");
     if (!holder) return;
+    const labels = {
+      all: t("common.all"),
+      completed: t("library.completed"),
+      incomplete: t("library.incomplete"),
+    };
     holder.innerHTML = Object.entries(counts)
       .map(
         ([status, count]) => `<button class="filter-chip ${filter === status ? "is-active" : ""}" type="button" data-filter="${status}" aria-pressed="${
           filter === status
-        }">${ui.esc(status === "all" ? t("common.all") : ui.statusLabel(status))}<small>${ui.formatNumberLabel(
+        }">${ui.esc(labels[status] || ui.statusLabel(status))}<small>${ui.formatNumberLabel(
           count,
         )}</small></button>`,
       )
       .join("");
+  }
+
+  function paintSelection() {
+    const ids = new Set(jobs.map((job) => job.id));
+    for (const id of [...selected]) if (!ids.has(id)) selected.delete(id);
+    const button = main.querySelector("#library-delete-selected");
+    const label = main.querySelector("#library-delete-label");
+    if (button) button.disabled = selected.size === 0;
+    if (label) {
+      label.textContent = selected.size
+        ? t("common.deleteCount", { count: selected.size })
+        : t("common.delete");
+    }
   }
 
   function paintList() {
@@ -899,9 +1092,34 @@ async function libraryView(token) {
         body: t("library.searchPlaceholder"),
       });
     } else {
-      holder.innerHTML = `<div class="row-list">${rows.map(jobRow).join("")}</div>`;
+      holder.innerHTML = `<div class="row-list">${rows
+        .map((job) => jobRow(job, { selectable: true, selected: selected.has(job.id) }))
+        .join("")}</div>`;
     }
     paintFilters();
+    paintSelection();
+  }
+
+  async function deleteSelected() {
+    if (!selected.size) return;
+    const confirmed = await ui.confirmDialog(
+      t("library.bulkDeleteConfirm", { count: selected.size }),
+      {
+        title: t("library.bulkDelete"),
+        confirmLabel: t("common.delete"),
+        danger: true,
+      },
+    );
+    if (!confirmed) return;
+    const ids = [...selected];
+    const results = await Promise.allSettled(ids.map((id) => api.deleteVideo(id)));
+    const failures = results.filter((result) => result.status === "rejected").length;
+    if (failures) {
+      ui.toast(t("library.bulkDeletePartial", { count: failures }), "warning");
+    } else {
+      ui.toast(t("library.movedToTrash", { count: ids.length }), "success");
+    }
+    renderRoute();
   }
 
   return {
@@ -920,12 +1138,49 @@ async function libraryView(token) {
         filter = chip.dataset.filter;
         paintList();
       });
-      startPolling(async () => {
-        if (state.token !== token) return;
-        const next = await api.listVideoJobs({ limit: 200 });
-        jobs = next.jobs || [];
+      main.querySelector("#library-select-all")?.addEventListener("click", () => {
+        filteredJobs().forEach((job) => selected.add(job.id));
         paintList();
-      }, 3000, token);
+      });
+      main.querySelector("#library-clear")?.addEventListener("click", () => {
+        selected.clear();
+        paintList();
+      });
+      main.querySelector("#library-delete-selected")?.addEventListener("click", deleteSelected);
+      main.querySelector("#library-list")?.addEventListener("change", (event) => {
+        const checkbox = event.target.closest("[data-select-job]");
+        if (!checkbox) return;
+        if (checkbox.checked) selected.add(checkbox.dataset.selectJob);
+        else selected.delete(checkbox.dataset.selectJob);
+        paintSelection();
+      });
+      main.querySelector("#library-list")?.addEventListener("change", async (event) => {
+        const checkbox = event.target.closest("[data-publish-source]");
+        if (!checkbox) return;
+        const jobId = checkbox.dataset.publishSource;
+        const published = checkbox.checked;
+        checkbox.disabled = true;
+        try {
+          const result = await api.setSourcePublished(jobId, published);
+          jobs = jobs.map((job) => (job.id === jobId ? result.job : job));
+          paintList();
+          ui.toast(t(published ? "library.sourcePublished" : "library.sourceUnpublished"), "success");
+        } catch {
+          checkbox.checked = !published;
+          checkbox.disabled = false;
+          ui.toast(t("library.sourcePublishFailed"), "error");
+        }
+      });
+      startPolling(
+        async ({ signal }) => {
+          const next = await api.listVideoJobs({ limit: 200 }, { signal });
+          const nextJobs = next.jobs || [];
+          if (sameJson(nextJobs, jobs)) return;
+          jobs = nextJobs;
+          paintList();
+        },
+        { interval: 4000, token, isActive: () => jobs.some(isJobActive) },
+      );
     },
   };
 }
@@ -1414,14 +1669,14 @@ async function analysisView(route, token) {
         });
       });
 
-      startPolling(async () => {
-        if (state.token !== token) return;
-        const next = await api.getVideoJob(job.id);
-        const active = next.status === "processing" || next.status === "queued";
-        if (active) {
-          renderRoute();
-        }
-      }, 3500, token);
+      const wasActive = isJobActive(job);
+      startPolling(
+        async ({ signal }) => {
+          const next = await api.getVideoJob(job.id, { signal });
+          if (isJobActive(next) || wasActive) renderRoute();
+        },
+        { interval: 4000, token, isActive: () => wasActive },
+      );
     },
   };
 }
@@ -1633,6 +1888,7 @@ async function exportView(route, token) {
   const selectedHighlights = highlights
     .map((highlight, index) => ({ highlight, index }))
     .filter(({ index }) => selected.has(index));
+  const initialActiveIndex = selectedHighlights[0]?.index ?? null;
 
   const html = `<div class="page-enter">
     ${pageHead({
@@ -1656,22 +1912,16 @@ async function exportView(route, token) {
           </div>
           <div class="selected-highlights">
             ${highlights
-              .map(
-                (highlight, index) => `<label class="selected-highlight">
-                  <input type="checkbox" name="highlight" value="${index}" ${
-                    selected.has(index) ? "checked" : ""
-                  } />
-                  <span><strong>${ui.esc(highlight.title)}</strong><small>${ui.esc(
-                    highlight.category || "",
-                  )}</small></span>
-                  <span class="duration" dir="ltr">${ui.esc(
-                    ui.formatDuration(highlight.end_time - highlight.start_time),
-                  )}</span>
-                </label>`,
+              .map((highlight, index) =>
+                exportHighlightRow(highlight, index, {
+                  checked: selected.has(index),
+                  active: initialActiveIndex === index,
+                }),
               )
               .join("")}
           </div>
         </section>
+        <section class="form-section trim-editor" id="trim-editor" aria-labelledby="trim-editor-title"></section>
         <section class="form-section">
           <div class="form-section-header">
             <div><h3>${ui.esc(t("export.formats"))}</h3><p>${ui.esc(t("export.formatsHint"))}</p></div>
@@ -1707,6 +1957,29 @@ async function exportView(route, token) {
               <option value="ar">${ui.esc(t("common.arabic"))}</option>
             </select>
           </label>
+        </section>
+        <section class="form-section">
+          <div class="form-section-header">
+            <div><h3>${ui.esc(t("export.visual"))}</h3><p>${ui.esc(t("export.visualHint"))}</p></div>
+          </div>
+          <label class="check-row">
+            <input type="checkbox" id="visual-enhancement" checked />
+            <span>${ui.esc(t("export.visualEnhancement"))}<small>${ui.esc(t("export.visualEnhancementHint"))}</small></span>
+          </label>
+          <label>${ui.esc(t("export.visualIntensity"))}
+            <select id="visual-intensity">
+              <option value="subtle">${ui.esc(t("export.intensitySubtle"))}</option>
+              <option value="balanced" selected>${ui.esc(t("export.intensityBalanced"))}</option>
+              <option value="strong">${ui.esc(t("export.intensityStrong"))}</option>
+            </select>
+          </label>
+          <div class="check-row">
+            <label><input type="checkbox" id="visual-zoom" checked /> ${ui.esc(t("export.visualZoom"))}</label>
+            <label><input type="checkbox" id="visual-punch" checked /> ${ui.esc(t("export.visualPunch"))}</label>
+            <label><input type="checkbox" id="visual-emphasis" checked /> ${ui.esc(t("export.visualEmphasis"))}</label>
+            <label><input type="checkbox" id="visual-transitions" checked /> ${ui.esc(t("export.visualTransitions"))}</label>
+            <label><input type="checkbox" id="visual-callouts" checked /> ${ui.esc(t("export.visualCallouts"))}</label>
+          </div>
         </section>
         <section class="form-section">
           <div class="form-section-header">
@@ -1758,13 +2031,11 @@ async function exportView(route, token) {
           <h3>${ui.esc(t("export.selectHighlights"))}</h3>
           <div class="selected-highlights" id="export-selected-list">
             ${selectedHighlights
-              .map(
-                ({ highlight, index }) => `<label class="selected-highlight">
-                  <input type="checkbox" data-summary-highlight="${index}" checked />
-                  <span><strong>${ui.esc(highlight.title)}</strong><small>${ui.esc(
-                    ui.formatDuration(highlight.end_time - highlight.start_time),
-                  )}</small></span>
-                </label>`,
+              .map(({ highlight, index }) =>
+                exportHighlightRow(highlight, index, {
+                  summary: true,
+                  active: initialActiveIndex === index,
+                }),
               )
               .join("")}
           </div>
@@ -1779,13 +2050,17 @@ async function exportView(route, token) {
     mount() {
       const form = main.querySelector("#export-form");
       if (!form) return;
+      let editor = null;
+      const selectedInputs = () => [
+        ...form.querySelectorAll('input[name="highlight"]:checked'),
+      ];
       const update = () => {
-        const selectedInputs = [...form.querySelectorAll('input[name="highlight"]:checked')];
+        const checkedInputs = selectedInputs();
         const formatInputs = [...form.querySelectorAll('input[name="format"]:checked')];
         const quality = form.querySelector('input[name="quality"]:checked')?.value || defaultQuality;
         const fit = form.querySelector('input[name="fit"]:checked')?.value || defaultFit;
         const captions = Boolean(form.querySelector("#captions-toggle")?.checked);
-        const count = selectedInputs.length;
+        const count = checkedInputs.length;
         const outputs = count * formatInputs.length;
         const set = (id, value) => {
           const element = main.querySelector(id);
@@ -1797,37 +2072,90 @@ async function exportView(route, token) {
         set("#summary-quality", qualityName(quality));
         set("#summary-fit", fitName(fit));
         selected.clear();
-        selectedInputs.forEach((input) => selected.add(Number(input.value)));
+        checkedInputs.forEach((input) => selected.add(Number(input.value)));
+        const activeIndex = editor?.getActiveIndex() ?? null;
+        form.querySelectorAll("[data-trim-row]").forEach((row) => {
+          const index = Number(row.dataset.trimRow);
+          const highlight = highlights[index];
+          const range = editor?.rangeFor(index);
+          const custom = editor?.isCustom(index) ?? false;
+          row.classList.toggle("is-active", activeIndex === index);
+          row.classList.toggle("is-custom", custom);
+          const duration = row.querySelector(".duration");
+          if (duration) {
+            const start = Number(range?.start ?? highlight.start_time ?? 0);
+            const end = Number(range?.end ?? highlight.end_time ?? start);
+            duration.textContent = ui.formatDuration(end - start);
+          }
+          row
+            .querySelector("[data-trim-highlight]")
+            ?.setAttribute("aria-pressed", String(activeIndex === index));
+        });
         const list = main.querySelector("#export-selected-list");
         if (list) {
-          list.innerHTML = selectedInputs
+          list.innerHTML = checkedInputs
             .map((input) => {
-              const highlight = highlights[Number(input.value)];
-              return `<label class="selected-highlight">
-                <input type="checkbox" data-summary-highlight="${input.value}" checked />
-                <span><strong>${ui.esc(highlight.title)}</strong><small>${ui.esc(
-                  ui.formatDuration(highlight.end_time - highlight.start_time),
-                )}</small></span>
-              </label>`;
+              const index = Number(input.value);
+              return exportHighlightRow(highlights[index], index, {
+                summary: true,
+                active: activeIndex === index,
+                range: editor?.rangeFor(index),
+                custom: editor?.isCustom(index) ?? false,
+              });
             })
             .join("");
         }
       };
       form.addEventListener("change", (event) => {
-        if (event.target.matches("[data-summary-highlight]")) {
-          const index = Number(event.target.dataset.summaryHighlight);
-          const source = form.querySelector(`input[name="highlight"][value="${index}"]`);
-          if (source) source.checked = event.target.checked;
+        const summary = event.target.closest("[data-summary-highlight]");
+        let changedIndex = null;
+        let changedChecked = null;
+        if (summary) {
+          changedIndex = Number(summary.dataset.summaryHighlight);
+          changedChecked = summary.checked;
+          const source = form.querySelector(
+            `input[name="highlight"][value="${changedIndex}"]`,
+          );
+          if (source) source.checked = changedChecked;
+        } else if (event.target.matches('input[name="highlight"]')) {
+          changedIndex = Number(event.target.value);
+          changedChecked = event.target.checked;
         }
         update();
+        if (changedIndex === null || !editor) return;
+        if (changedChecked) {
+          editor.open(changedIndex);
+        } else if (editor.getActiveIndex() === changedIndex) {
+          const next = selectedInputs()[0];
+          editor.open(next ? Number(next.value) : null);
+        }
       });
-      form.querySelectorAll("[data-summary-highlight]").forEach((checkbox) => {
-        checkbox.addEventListener("change", () => {
-          const index = Number(checkbox.dataset.summaryHighlight);
-          const source = form.querySelector(`input[name="highlight"][value="${index}"]`);
-          if (source) source.checked = checkbox.checked;
-          update();
+      form.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-trim-highlight]");
+        if (!button || !form.contains(button)) return;
+        editor?.open(Number(button.dataset.trimHighlight));
+        const section = main.querySelector("#trim-editor");
+        const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+        section?.scrollIntoView({
+          behavior: reduceMotion ? "auto" : "smooth",
+          block: "nearest",
         });
+      });
+      editor = createTrimEditor({
+        root: main.querySelector("#trim-editor"),
+        highlights,
+        sourceUrl: api.sourceMediaUrl(job.id),
+        sourceDuration: job.metadata?.duration_seconds ?? null,
+        minDuration: config.min_clip_seconds,
+        maxDuration: config.max_clip_seconds,
+        initialIndex: initialActiveIndex,
+        onChange: update,
+        onActiveChange: update,
+      });
+      state.trimEditor = editor;
+      state.cleanup.push(() => {
+        editor.destroy();
+        if (state.trimEditor === editor) state.trimEditor = null;
       });
       update();
     },
@@ -1840,7 +2168,9 @@ async function clipsView(token) {
   await loadSourceJobs(clips);
   let statusFilter = "all";
   let formatFilter = "all";
+  let publishFilter = "all";
   let searchValue = "";
+  const selected = new Set();
 
   const html = `<div class="page-enter">
     ${pageHead({
@@ -1849,16 +2179,29 @@ async function clipsView(token) {
       description: t("clips.description"),
       actions: `<a class="button button-secondary" href="#/library">${ui.icon("library")}<span>${ui.esc(
         t("nav.library"),
+      )}</span></a>
+      <a class="button button-secondary" href="#/trash">${ui.icon("trash")}<span>${ui.esc(
+        t("nav.trash"),
       )}</span></a>`,
     })}
-    <div class="toolbar">
+    <div class="toolbar toolbar-wrap">
       <div class="search-field">
         ${ui.icon("search")}
         <input id="clips-search" type="search" autocomplete="off" placeholder="${ui.attr(
           t("clips.searchPlaceholder"),
         )}" aria-label="${ui.attr(t("common.search"))}" />
       </div>
-      <div class="toolbar-spacer"></div>
+      <div class="toolbar-actions">
+        <button class="button button-ghost button-small" type="button" id="clips-select-all">${ui.icon(
+          "check",
+        )}<span>${ui.esc(t("common.selectAll"))}</span></button>
+        <button class="button button-ghost button-small" type="button" id="clips-clear">${ui.icon(
+          "cancel",
+        )}<span>${ui.esc(t("common.clear"))}</span></button>
+        <button class="button button-danger button-small" type="button" id="clips-delete-selected" disabled>${ui.icon(
+          "trash",
+        )}<span id="clips-delete-label">${ui.esc(t("common.delete"))}</span></button>
+      </div>
       <span class="small muted" id="clips-count"></span>
     </div>
     <div class="filter-row" id="clip-status-filters" role="group" aria-label="${ui.attr(
@@ -1866,6 +2209,9 @@ async function clipsView(token) {
     )}"></div>
     <div class="filter-row" id="clip-format-filters" role="group" aria-label="${ui.attr(
       t("common.format"),
+    )}" style="margin-block-start:8px"></div>
+    <div class="filter-row" id="clip-publish-filters" role="group" aria-label="${ui.attr(
+      t("clips.publishing"),
     )}" style="margin-block-start:8px"></div>
     <div id="clip-results" style="margin-block-start:18px" aria-live="polite"></div>
   </div>`;
@@ -1875,6 +2221,8 @@ async function clipsView(token) {
     return clips.filter((clip) => {
       if (statusFilter !== "all" && clip.status !== statusFilter) return false;
       if (formatFilter !== "all" && clip.format !== formatFilter) return false;
+      if (publishFilter === "published" && !clip.published) return false;
+      if (publishFilter === "unpublished" && clip.published) return false;
       if (!query) return true;
       const source = sourceJobFor(clip);
       return [
@@ -1882,6 +2230,9 @@ async function clipsView(token) {
         clip.source_job_id,
         clip.format,
         clip.quality,
+        clip.title,
+        clip.description,
+        ...(clip.hashtags || []),
         clipTitle(clip, source),
         source ? ui.jobTitle(source) : "",
       ]
@@ -1893,6 +2244,7 @@ async function clipsView(token) {
   function paintFilters() {
     const statusHolder = main.querySelector("#clip-status-filters");
     const formatHolder = main.querySelector("#clip-format-filters");
+    const publishHolder = main.querySelector("#clip-publish-filters");
     if (statusHolder) {
       const counts = { all: clips.length };
       for (const status of ["ready", "processing", "queued", "failed", "cancelled"]) {
@@ -1917,6 +2269,33 @@ async function clipsView(token) {
           }">${ui.esc(format === "all" ? t("common.all") : formatName(format))}</button>`,
         )
         .join("");
+    }
+    if (publishHolder) {
+      const items = [
+        ["all", t("common.all")],
+        ["published", t("clips.published")],
+        ["unpublished", t("clips.unpublished")],
+      ];
+      publishHolder.innerHTML = items
+        .map(
+          ([value, label]) => `<button class="filter-chip ${publishFilter === value ? "is-active" : ""}" type="button" data-publish-filter="${value}" aria-pressed="${
+            publishFilter === value
+          }">${ui.esc(label)}</button>`,
+        )
+        .join("");
+    }
+  }
+
+  function paintSelection() {
+    const ids = new Set(clips.map((clip) => clip.id));
+    for (const id of [...selected]) if (!ids.has(id)) selected.delete(id);
+    const button = main.querySelector("#clips-delete-selected");
+    const label = main.querySelector("#clips-delete-label");
+    if (button) button.disabled = selected.size === 0;
+    if (label) {
+      label.textContent = selected.size
+        ? t("common.deleteCount", { count: selected.size })
+        : t("common.delete");
     }
   }
 
@@ -1944,9 +2323,34 @@ async function clipsView(token) {
         body: t("clips.searchPlaceholder"),
       });
     } else {
-      holder.innerHTML = `<div class="clip-grid">${rows.map(clipCard).join("")}</div>`;
+      holder.innerHTML = `<div class="clip-grid">${rows
+        .map((clip) => clipCard(clip, { selectable: true, selected: selected.has(clip.id) }))
+        .join("")}</div>`;
     }
     paintFilters();
+    paintSelection();
+  }
+
+  async function deleteSelected() {
+    if (!selected.size) return;
+    const confirmed = await ui.confirmDialog(
+      t("clips.bulkDeleteConfirm", { count: selected.size }),
+      {
+        title: t("clips.bulkDelete"),
+        confirmLabel: t("common.delete"),
+        danger: true,
+      },
+    );
+    if (!confirmed) return;
+    const ids = [...selected];
+    const results = await Promise.allSettled(ids.map((id) => api.deleteClip(id)));
+    const failures = results.filter((result) => result.status === "rejected").length;
+    if (failures) {
+      ui.toast(t("clips.bulkDeletePartial", { count: failures }), "warning");
+    } else {
+      ui.toast(t("clips.movedToTrash", { count: ids.length }), "success");
+    }
+    renderRoute();
   }
 
   return {
@@ -1971,13 +2375,488 @@ async function clipsView(token) {
         formatFilter = chip.dataset.formatFilter;
         paint();
       });
-      startPolling(async () => {
-        if (state.token !== token) return;
-        const next = await api.listClipJobs({ limit: 200 });
-        clips = next.jobs || [];
-        await loadSourceJobs(clips);
+      main.querySelector("#clip-publish-filters")?.addEventListener("click", (event) => {
+        const chip = event.target.closest("[data-publish-filter]");
+        if (!chip) return;
+        publishFilter = chip.dataset.publishFilter;
         paint();
-      }, 3000, token);
+      });
+      main.querySelector("#clips-select-all")?.addEventListener("click", () => {
+        filtered().forEach((clip) => selected.add(clip.id));
+        paint();
+      });
+      main.querySelector("#clips-clear")?.addEventListener("click", () => {
+        selected.clear();
+        paint();
+      });
+      main.querySelector("#clips-delete-selected")?.addEventListener("click", deleteSelected);
+      main.querySelector("#clip-results")?.addEventListener("change", (event) => {
+        const checkbox = event.target.closest("[data-select-clip]");
+        if (!checkbox) return;
+        if (checkbox.checked) selected.add(checkbox.dataset.selectClip);
+        else selected.delete(checkbox.dataset.selectClip);
+        paintSelection();
+      });
+      startPolling(
+        async ({ signal, force }) => {
+          const activeIds = clips.filter(isClipActive).map((clip) => clip.id);
+          if (!activeIds.length && !force) return;
+          const next = await api.listClipJobs(
+            force
+              ? { limit: 200 }
+              : { ids: activeIds.join(","), limit: Math.min(activeIds.length, 500) },
+            { signal },
+          );
+          const updated = next.jobs || [];
+          let nextClips = updated;
+          if (!force) {
+            const byId = new Map(updated.map((clip) => [clip.id, clip]));
+            const polled = new Set(activeIds);
+            const complete = activeIds.length <= 500;
+            nextClips = clips
+              .filter((clip) => !complete || !polled.has(clip.id) || byId.has(clip.id))
+              .map((clip) => byId.get(clip.id) || clip);
+          }
+          if (sameJson(nextClips, clips)) return;
+          clips = nextClips;
+          await loadSourceJobs(clips, signal);
+          paint();
+        },
+        { interval: 4000, token, isActive: () => clips.some(isClipActive) },
+      );
+    },
+  };
+}
+
+async function clipDetailView(route, token) {
+  const clip = await api.getClipJob(route.id);
+  let source = state.videoCache.get(clip.source_job_id) || null;
+  if (!source) {
+    try {
+      source = await api.getVideoJob(clip.source_job_id);
+      state.videoCache.set(clip.source_job_id, source);
+    } catch {
+      source = null;
+    }
+  }
+  const ready = clip.status === "ready";
+  const title = clipTitle(clip, source);
+  const downloadUrl = api.clipDownloadUrl(clip.id);
+  const hashtagsText = (clip.hashtags || []).join(" ");
+  const player = ready
+    ? `<video class="clip-detail-player" src="${downloadUrl}" controls playsinline preload="metadata"></video>`
+    : `<div class="clip-detail-player is-placeholder">${ui.icon("film")}<p>${ui.esc(
+        t("clips.noPreview"),
+      )}</p></div>`;
+  const metadataStatus = clip.metadata_status
+    ? metadataStatusLabel(clip.metadata_status)
+    : t("clips.metadataNone");
+  const errorNotice = clip.error?.message
+    ? `<div class="notice is-error">${ui.icon("alert")}<div>${ui.esc(clip.error.message)}</div></div>`
+    : "";
+  const metadataError = clip.metadata_error
+    ? `<div class="notice is-warning">${ui.icon("alert")}<div>${ui.esc(clip.metadata_error)}</div></div>`
+    : "";
+
+  const html = `<div class="page-enter">
+    ${pageHead({
+      context: t("clips.detailContext"),
+      title,
+      description: t("clips.detailDescription"),
+      actions: `<a class="button button-secondary" href="#/clips">${ui.icon("arrow")}<span>${ui.esc(
+        t("clips.backToClips"),
+      )}</span></a>
+      ${
+        ready
+          ? `<a class="button button-primary" href="${downloadUrl}" download>${ui.icon(
+              "download",
+            )}<span>${ui.esc(t("common.download"))}</span></a>`
+          : ""
+      }
+      <button class="button button-danger" type="button" data-action="delete-clip" data-clip-id="${ui.attr(
+        clip.id,
+      )}">${ui.icon("trash")}<span>${ui.esc(t("common.delete"))}</span></button>`,
+    })}
+    <div class="clip-detail-layout">
+      <div class="stack">
+        <section class="form-section clip-player-card">
+          ${player}
+          <div class="signal-list compact">
+            ${ui.statusPill(clip.status)}
+            ${clipPublishBadge(clip)}
+            <span class="tag">${ui.esc(metadataStatus)}</span>
+          </div>
+          <div class="info-grid">
+            <div class="info-cell"><span>${ui.esc(t("common.duration"))}</span><strong dir="ltr">${ui.esc(
+              ui.formatDuration(clip.duration),
+            )}</strong></div>
+            <div class="info-cell"><span>${ui.esc(t("common.format"))}</span><strong>${ui.esc(
+              `${formatName(clip.format)} · ${clip.width}×${clip.height}`,
+            )}</strong></div>
+            <div class="info-cell"><span>${ui.esc(t("common.created"))}</span><strong>${ui.esc(
+              ui.formatDateTimeLabel(clip.created_at),
+            )}</strong></div>
+            <div class="info-cell"><span>${ui.esc(t("common.size"))}</span><strong dir="ltr">${ui.esc(
+              ui.formatBytes(clip.size_bytes),
+            )}</strong></div>
+          </div>
+          ${errorNotice}
+        </section>
+        <section class="form-section">
+          <div class="form-section-header">
+            <div><h3>${ui.esc(t("clips.publishing"))}</h3><p>${ui.esc(t("clips.publishingHint"))}</p></div>
+          </div>
+          <label class="check-row">
+            <input type="checkbox" id="clip-published" ${clip.published ? "checked" : ""} ${
+              ready ? "" : "disabled"
+            }/>
+            <span>${ui.esc(t("clips.markPublished"))}<small id="clip-published-state">${ui.esc(
+              clip.published ? t("clips.publishedAt", { time: ui.formatDateTimeLabel(clip.published_at) }) : t("clips.unpublished"),
+            )}</small></span>
+          </label>
+          <p class="field-hint">${ui.esc(t("clips.manualPublishOnly"))}</p>
+        </section>
+        <section class="form-section">
+          <div class="form-section-header">
+            <div><h3>${ui.esc(t("clips.sourceJob"))}</h3><p>${ui.esc(t("clips.sourceJobHint"))}</p></div>
+          </div>
+          <p><a class="text-link" href="#/video/${ui.attr(clip.source_job_id)}">${ui.esc(
+            source ? ui.jobTitle(source) : clip.source_job_id.slice(0, 12),
+          )}</a></p>
+        </section>
+      </div>
+      <form class="stack" id="clip-metadata-form" data-clip-id="${ui.attr(clip.id)}">
+        <section class="form-section">
+          <div class="form-section-header">
+            <div><h3>${ui.esc(t("clips.metadata"))}</h3><p>${ui.esc(t("clips.metadataHint"))}</p></div>
+            <span class="tag" id="clip-metadata-status">${ui.esc(metadataStatus)}</span>
+          </div>
+          ${metadataError}
+          <label>${ui.esc(t("clips.titleField"))}
+            <input id="clip-title" maxlength="300" value="${ui.attr(clip.title || "")}" placeholder="${ui.attr(
+              title,
+            )}" />
+          </label>
+          <label>${ui.esc(t("clips.descriptionField"))}
+            <textarea id="clip-description" rows="7" placeholder="${ui.attr(
+              t("clips.descriptionPlaceholder"),
+            )}">${ui.esc(clip.description || "")}</textarea>
+          </label>
+          <label>${ui.esc(t("clips.hashtagsField"))}
+            <input id="clip-hashtags" value="${ui.attr(hashtagsText)}" placeholder="#shorts #clips" />
+            <span class="field-hint">${ui.esc(t("clips.hashtagsHint"))}</span>
+          </label>
+          <div class="segmented">
+            <button class="button button-primary" type="button" id="clip-metadata-save" ${
+              ready ? "" : "disabled"
+            }>${ui.icon("check")}<span>${ui.esc(t("common.save"))}</span></button>
+            <button class="button button-secondary" type="button" id="clip-metadata-regenerate" ${
+              ready ? "" : "disabled"
+            }>${ui.icon("spark")}<span>${ui.esc(t("clips.regenerate"))}</span></button>
+          </div>
+        </section>
+        <section class="form-section">
+          <div class="form-section-header">
+            <div><h3>${ui.esc(t("clips.copyActions"))}</h3><p>${ui.esc(t("clips.copyHint"))}</p></div>
+          </div>
+          <div class="copy-grid">
+            <button class="button button-secondary button-small" type="button" data-copy-field="title">${ui.icon(
+              "copy",
+            )}<span>${ui.esc(t("clips.copyTitle"))}</span></button>
+            <button class="button button-secondary button-small" type="button" data-copy-field="description">${ui.icon(
+              "copy",
+            )}<span>${ui.esc(t("clips.copyDescription"))}</span></button>
+            <button class="button button-secondary button-small" type="button" data-copy-field="hashtags">${ui.icon(
+              "copy",
+            )}<span>${ui.esc(t("clips.copyHashtags"))}</span></button>
+            <button class="button button-primary button-small" type="button" data-copy-field="all">${ui.icon(
+              "copy",
+            )}<span>${ui.esc(t("clips.copyAll"))}</span></button>
+          </div>
+          <div class="notice">${ui.icon("info")}<div>${ui.esc(t("clips.copyFormatHint"))}</div></div>
+          <div id="clip-metadata-feedback" class="notice" hidden aria-live="polite"></div>
+        </section>
+      </form>
+    </div>
+  </div>`;
+
+  return {
+    title,
+    html,
+    mount() {
+      if (state.token !== token) return;
+      const form = main.querySelector("#clip-metadata-form");
+      const feedback = main.querySelector("#clip-metadata-feedback");
+      const showFeedback = (message, type = "info") => {
+        if (!feedback) return;
+        feedback.hidden = false;
+        feedback.className = `notice ${type === "error" ? "is-error" : type === "warning" ? "is-warning" : ""}`;
+        feedback.innerHTML = `${ui.icon(type === "error" || type === "warning" ? "alert" : "info")}<div>${ui.esc(
+          message,
+        )}</div>`;
+      };
+      const values = () => ({
+        title: main.querySelector("#clip-title")?.value || "",
+        description: main.querySelector("#clip-description")?.value || "",
+        hashtags: main.querySelector("#clip-hashtags")?.value || "",
+      });
+      main.querySelector("#clip-metadata-save")?.addEventListener("click", async (event) => {
+        const button = event.currentTarget;
+        ui.setBusy(button, true, t("common.saving"));
+        try {
+          const payload = values();
+          await api.updateClipMetadata(clip.id, {
+            ...payload,
+            hashtags: payload.hashtags.split(/[\s,،]+/).filter(Boolean),
+          });
+          ui.toast(t("clips.metadataSaved"), "success");
+          renderRoute();
+        } catch (error) {
+          ui.setBusy(button, false);
+          showFeedback(error.message || t("common.error"), "error");
+        }
+      });
+      main.querySelector("#clip-metadata-regenerate")?.addEventListener("click", async (event) => {
+        const button = event.currentTarget;
+        if (clip.metadata_status === "manually_edited") {
+          const confirmed = await ui.confirmDialog(t("clips.regenerateOverwriteConfirm"), {
+            title: t("clips.regenerate"),
+            confirmLabel: t("clips.regenerate"),
+            danger: true,
+          });
+          if (!confirmed) return;
+        }
+        ui.setBusy(button, true, t("clips.generatingMetadata"));
+        try {
+          await api.regenerateClipMetadata(clip.id, { force: true });
+          ui.toast(t("clips.metadataGenerated"), "success");
+          renderRoute();
+        } catch (error) {
+          ui.setBusy(button, false);
+          showFeedback(error.message || t("common.error"), "error");
+        }
+      });
+      main.querySelector("#clip-published")?.addEventListener("change", async (event) => {
+        const checkbox = event.currentTarget;
+        try {
+          await api.setClipPublished(clip.id, checkbox.checked);
+          ui.toast(
+            checkbox.checked ? t("clips.markedPublished") : t("clips.markedUnpublished"),
+            "success",
+          );
+          renderRoute();
+        } catch (error) {
+          checkbox.checked = !checkbox.checked;
+          showFeedback(error.message || t("common.error"), "error");
+        }
+      });
+      form?.addEventListener("click", async (event) => {
+        const button = event.target.closest("[data-copy-field]");
+        if (!button) return;
+        const current = values();
+        const text =
+          button.dataset.copyField === "all"
+            ? [current.title, current.description, current.hashtags].filter(Boolean).join("\n\n")
+            : current[button.dataset.copyField] || "";
+        if (!text.trim()) {
+          showFeedback(t("clips.copyEmpty"), "warning");
+          return;
+        }
+        try {
+          await ui.copyText(text);
+          ui.toast(t("common.copied"), "success");
+        } catch {
+          showFeedback(t("clips.copyFailed"), "error");
+        }
+      });
+    },
+  };
+}
+
+async function trashView(token) {
+  const data = await api.listTrash();
+  let items = data.items || [];
+  const selected = new Set();
+  const keyFor = (item) => `${item.kind}:${item.id}`;
+
+  const html = `<div class="page-enter">
+    ${pageHead({
+      context: t("nav.trash"),
+      title: t("trash.title"),
+      description: t("trash.description"),
+      actions: `<a class="button button-secondary" href="#/library">${ui.icon("library")}<span>${ui.esc(
+        t("nav.library"),
+      )}</span></a>
+      <a class="button button-secondary" href="#/clips">${ui.icon("clips")}<span>${ui.esc(
+        t("nav.clips"),
+      )}</span></a>`,
+    })}
+    <div class="toolbar toolbar-wrap">
+      <div class="toolbar-actions">
+        <button class="button button-ghost button-small" type="button" id="trash-select-all">${ui.icon(
+          "check",
+        )}<span>${ui.esc(t("common.selectAll"))}</span></button>
+        <button class="button button-ghost button-small" type="button" id="trash-clear">${ui.icon(
+          "cancel",
+        )}<span>${ui.esc(t("common.clear"))}</span></button>
+        <button class="button button-primary button-small" type="button" id="trash-restore-selected" disabled>${ui.icon(
+          "retry",
+        )}<span>${ui.esc(t("trash.restore"))}</span></button>
+        <button class="button button-danger button-small" type="button" id="trash-purge-selected" disabled>${ui.icon(
+          "trash",
+        )}<span>${ui.esc(t("trash.deleteForever"))}</span></button>
+        <button class="button button-danger button-small" type="button" id="trash-empty">${ui.icon(
+          "trash",
+        )}<span>${ui.esc(t("trash.empty"))}</span></button>
+      </div>
+      <div class="toolbar-spacer"></div>
+      <span class="small muted" id="trash-count"></span>
+    </div>
+    <div class="notice">${ui.icon("info")}<div>${ui.esc(t("trash.retentionNote"))}</div></div>
+    <div class="list-surface" style="margin-block-start:14px">
+      <div class="list-head">
+        <span>${ui.esc(t("trash.item"))}</span>
+        <span>${ui.esc(t("common.type"))}</span>
+        <span>${ui.esc(t("trash.deletedAt"))}</span>
+        <span>${ui.esc(t("common.status"))}</span>
+        <span style="text-align:end">${ui.esc(t("common.actions"))}</span>
+      </div>
+      <div class="list-body" id="trash-list" aria-live="polite"></div>
+    </div>
+  </div>`;
+
+  function paintSelection() {
+    const buttonRestore = main.querySelector("#trash-restore-selected");
+    const buttonPurge = main.querySelector("#trash-purge-selected");
+    if (buttonRestore) buttonRestore.disabled = selected.size === 0;
+    if (buttonPurge) buttonPurge.disabled = selected.size === 0;
+  }
+
+  function row(item) {
+    const key = keyFor(item);
+    return `<div class="job-row trash-row" data-kind="${ui.attr(item.kind)}" data-id="${ui.attr(
+      item.id,
+    )}">
+      <div class="job-row-main">
+        <label class="row-select"><input type="checkbox" data-select-trash="${ui.attr(key)}" ${
+          selected.has(key) ? "checked" : ""
+        } aria-label="${ui.attr(t("common.select"))}"/></label>
+        <div>
+          <strong>${ui.esc(item.title || item.id)}</strong>
+          <div class="job-sub">${ui.esc(item.id)}</div>
+        </div>
+      </div>
+      <span class="tag ${item.kind === "clip" ? "is-accent" : ""}">${ui.esc(
+        item.kind === "clip" ? t("common.clip") : t("common.video"),
+      )}</span>
+      <span>${ui.esc(ui.formatDateTimeLabel(item.deleted_at))}</span>
+      <span>${ui.esc(ui.statusLabel(item.status))}</span>
+      <div class="job-actions">
+        <button class="button button-ghost button-small" type="button" data-action="restore-trash" data-kind="${ui.attr(
+          item.kind,
+        )}" data-id="${ui.attr(item.id)}">${ui.esc(t("trash.restore"))}</button>
+        <button class="button button-ghost button-small" type="button" data-action="purge-trash" data-kind="${ui.attr(
+          item.kind,
+        )}" data-id="${ui.attr(item.id)}">${ui.esc(t("trash.deleteForever"))}</button>
+      </div>
+    </div>`;
+  }
+
+  function paint() {
+    const holder = main.querySelector("#trash-list");
+    const count = main.querySelector("#trash-count");
+    if (!holder) return;
+    if (count) count.textContent = ui.formatNumberLabel(items.length);
+    if (!items.length) {
+      holder.innerHTML = ui.renderEmpty({
+        iconName: "trash",
+        title: t("trash.emptyTitle"),
+        body: t("trash.emptyBody"),
+      });
+    } else {
+      holder.innerHTML = `<div class="row-list">${items.map(row).join("")}</div>`;
+    }
+    paintSelection();
+  }
+
+  async function runAction(itemsToApply, permanent) {
+    if (!itemsToApply.length) return;
+    const confirmed = await ui.confirmDialog(
+      permanent
+        ? t("trash.purgeConfirm", { count: itemsToApply.length })
+        : t("trash.restoreConfirm", { count: itemsToApply.length }),
+      {
+        title: permanent ? t("trash.deleteForever") : t("trash.restore"),
+        confirmLabel: permanent ? t("trash.deleteForever") : t("trash.restore"),
+        danger: permanent,
+      },
+    );
+    if (!confirmed) return;
+    try {
+      const payload = itemsToApply.map((item) => ({ kind: item.kind, id: item.id }));
+      const result = permanent
+        ? await api.purgeTrash(payload)
+        : await api.restoreTrash(payload);
+      if (result.errors?.length) {
+        ui.toast(t("trash.partial", { count: result.errors.length }), "warning");
+      } else {
+        ui.toast(
+          permanent
+            ? t("trash.purged", { count: result.count || payload.length })
+            : t("trash.restored", { count: result.count || payload.length }),
+          "success",
+        );
+      }
+      selected.clear();
+      renderRoute();
+    } catch (error) {
+      ui.toast(error.message || t("common.error"), "error");
+    }
+  }
+
+  return {
+    title: t("trash.title"),
+    html,
+    mount() {
+      paint();
+      main.querySelector("#trash-select-all")?.addEventListener("click", () => {
+        items.forEach((item) => selected.add(keyFor(item)));
+        paint();
+      });
+      main.querySelector("#trash-clear")?.addEventListener("click", () => {
+        selected.clear();
+        paint();
+      });
+      main.querySelector("#trash-list")?.addEventListener("change", (event) => {
+        const checkbox = event.target.closest("[data-select-trash]");
+        if (!checkbox) return;
+        if (checkbox.checked) selected.add(checkbox.dataset.selectTrash);
+        else selected.delete(checkbox.dataset.selectTrash);
+        paintSelection();
+      });
+      main.querySelector("#trash-restore-selected")?.addEventListener("click", () => {
+        runAction(items.filter((item) => selected.has(keyFor(item))), false);
+      });
+      main.querySelector("#trash-purge-selected")?.addEventListener("click", () => {
+        runAction(items.filter((item) => selected.has(keyFor(item))), true);
+      });
+      main.querySelector("#trash-empty")?.addEventListener("click", async () => {
+        if (!items.length) return;
+        const confirmed = await ui.confirmDialog(t("trash.emptyConfirm"), {
+          title: t("trash.empty"),
+          confirmLabel: t("trash.empty"),
+          danger: true,
+        });
+        if (!confirmed) return;
+        try {
+          const result = await api.emptyTrash();
+          ui.toast(t("trash.purged", { count: result.count || items.length }), "success");
+          selected.clear();
+          renderRoute();
+        } catch (error) {
+          ui.toast(error.message || t("common.error"), "error");
+        }
+      });
     },
   };
 }
@@ -2166,23 +3045,141 @@ async function jobsView(token) {
         statusFilter = chip.dataset.statusFilter;
         paint();
       });
-      const hasActive = [...videoJobs, ...clipJobs].some(
-        (job) => job.status === "processing" || job.status === "queued",
-      );
-      if (hasActive) {
-        startPolling(async () => {
-          if (state.token !== token) return;
+      startPolling(
+        async ({ signal }) => {
           const [nextVideo, nextClip] = await Promise.all([
-            api.listVideoJobs({ limit: 200 }),
-            api.listClipJobs({ limit: 200 }),
+            api.listVideoJobs({ limit: 200 }, { signal }),
+            api.listClipJobs({ limit: 200 }, { signal }),
           ]);
-          videoJobs = nextVideo.jobs || [];
-          clipJobs = nextClip.jobs || [];
-          await loadSourceJobs(clipJobs);
+          const nextVideoJobs = nextVideo.jobs || [];
+          const nextClipJobs = nextClip.jobs || [];
+          if (sameJson(nextVideoJobs, videoJobs) && sameJson(nextClipJobs, clipJobs)) return;
+          videoJobs = nextVideoJobs;
+          clipJobs = nextClipJobs;
+          await loadSourceJobs(clipJobs, signal);
           lastRefresh = new Date();
           paint();
-        }, 3000, token);
-      }
+        },
+        {
+          interval: 4000,
+          token,
+          isActive: () => videoJobs.some(isJobActive) || clipJobs.some(isClipActive),
+        },
+      );
+    },
+  };
+}
+
+async function skillsView(token) {
+  const data = await api.skills();
+  const skills = data.skills || [];
+  const tools = data.tools || [];
+  const cards = skills
+    .map((skill) => {
+      const permissions = skill.permissions || {};
+      const allowed = Object.entries(permissions)
+        .filter(([, value]) => value)
+        .map(([key]) => key);
+      return `<article class="provider-card">
+        <div class="provider-card-top">
+          <span class="provider-mark ${skill.enabled ? "is-ready" : ""}">${ui.esc(
+            skill.id.slice(0, 2).toUpperCase(),
+          )}</span>
+          <div>
+            <h3>${ui.esc(skill.name)}</h3>
+            <p>${ui.esc(skill.id)} · ${ui.esc(skill.category || "other")}</p>
+          </div>
+          <span class="provider-state ${skill.enabled ? "is-ready" : ""}" style="margin-inline-start:auto">${ui.esc(
+            skill.enabled ? t("skills.enabled") : t("skills.disabled"),
+          )}</span>
+        </div>
+        <p>${ui.esc(skill.description || "")}</p>
+        <div class="signal-list">
+          <span>${ui.esc(skill.source)}</span>
+          <span>${ui.esc(skill.reviewed ? t("skills.reviewed") : t("skills.reviewRequired"))}</span>
+          <span>${ui.esc(allowed.length ? allowed.join(", ") : t("skills.noPermissions"))}</span>
+        </div>
+        <p class="small muted">${ui.esc((skill.tools || []).join(", "))}</p>
+        <div class="provider-card-actions">
+          <button class="button button-secondary button-small" type="button" data-action="skill-toggle" data-skill="${ui.attr(
+            skill.id,
+          )}" data-enabled="${skill.enabled ? "false" : "true"}">${ui.esc(
+            skill.enabled ? t("skills.disable") : t("skills.enable"),
+          )}</button>
+          ${
+            !skill.reviewed
+              ? `<button class="button button-primary button-small" type="button" data-action="skill-review" data-skill="${ui.attr(
+                  skill.id,
+                )}">${ui.esc(t("skills.review"))}</button>`
+              : ""
+          }
+        </div>
+      </article>`;
+    })
+    .join("");
+
+  const toolRows = tools
+    .map(
+      (tool) => `<tr>
+        <td><span class="mono">${ui.esc(tool.name)}</span></td>
+        <td>${ui.esc(tool.description)}</td>
+        <td>${ui.esc(
+          [
+            tool.requires_network ? "network" : "",
+            tool.requires_filesystem ? "filesystem" : "",
+            tool.requires_subprocess ? "subprocess" : "",
+          ]
+            .filter(Boolean)
+            .join(", ") || t("skills.none"),
+        )}</td>
+      </tr>`,
+    )
+    .join("");
+
+  return {
+    title: t("skills.title"),
+    html: `<div class="page-enter">
+      ${pageHead({
+        context: t("dashboard.context"),
+        title: t("skills.title"),
+        description: t("skills.description"),
+      })}
+      <div class="notice" style="margin-block-end:18px">${ui.icon("info")}<div>${ui.esc(
+        t("skills.externalNote", { dir: data.external_dir || "config/skills" }),
+      )}</div></div>
+      <div class="stack">
+        <section>
+          <div class="section-title"><h2>${ui.esc(t("skills.installed"))}</h2><span class="tag">${ui.formatNumberLabel(
+            skills.length,
+          )}</span></div>
+          ${
+            cards
+              ? `<div class="provider-grid">${cards}</div>`
+              : ui.renderEmpty({
+                  iconName: "spark",
+                  title: t("skills.noSkills"),
+                  body: t("skills.externalNote", { dir: data.external_dir || "config/skills" }),
+                })
+          }
+        </section>
+        <section class="panel">
+          <div class="panel-header"><h2>${ui.esc(t("skills.tools"))}</h2></div>
+          <div class="panel-body">
+            ${
+              toolRows
+                ? `<div class="table-wrap"><table><thead><tr><th>${ui.esc(
+                    t("skills.tool"),
+                  )}</th><th>${ui.esc(t("skills.purpose"))}</th><th>${ui.esc(
+                    t("skills.permissions"),
+                  )}</th></tr></thead><tbody>${toolRows}</tbody></table></div>`
+                : `<p class="muted small">${ui.esc(t("skills.noSkills"))}</p>`
+            }
+          </div>
+        </section>
+      </div>
+    </div>`,
+    mount() {
+      if (state.token !== token) return;
     },
   };
 }
@@ -2224,10 +3221,37 @@ async function providersView(token) {
           <span>${ui.esc(provider.key_present ? t("common.keyPresent") : t("common.keyMissing"))}</span>
         </div>
         <p>${ui.esc(provider.reason || (providerState.ready ? t("providers.ready") : t("providers.notReadyBody")))}</p>
+        ${
+          provider.catalog
+            ? `<p class="small muted">${
+                provider.catalog.updated_at
+                  ? ui.esc(
+                      t("providers.catalogUpdated", {
+                        time: ui.formatDateTimeLabel(provider.catalog.updated_at),
+                      }),
+                    )
+                  : ui.esc(t("providers.catalogEmpty"))
+              } · ${ui.esc(
+                `${ui.formatNumberLabel(provider.catalog.models || 0)} ${t("common.models")}`,
+              )}</p>`
+            : ""
+        }
         <div class="provider-card-actions">
           <button class="button button-secondary button-small" type="button" data-action="test-provider" data-provider="${ui.attr(
             provider.id,
           )}">${ui.icon("spark")}<span>${ui.esc(t("common.testConnection"))}</span></button>
+          ${
+            provider.id === "nvidia"
+              ? `<button class="button button-secondary button-small" type="button" data-action="discover-nvidia">${ui.icon(
+                  "refresh",
+                )}<span>${ui.esc(t("providers.discoverNvidia"))}</span></button>`
+              : ""
+          }
+          <button class="button button-secondary button-small" type="button" data-action="provider-toggle" data-provider="${ui.attr(
+            provider.id,
+          )}" data-enabled="${provider.enabled ? "false" : "true"}">${ui.esc(
+            provider.enabled ? t("providers.disable") : t("providers.enable"),
+          )}</button>
           ${
             provider.last_health
               ? `<span class="tag ${provider.last_health.ok ? "is-teal" : ""}">${ui.esc(
@@ -2249,9 +3273,12 @@ async function providersView(token) {
           model.name || "",
         )}</div></td>
         <td>${ui.esc(model.provider)}</td>
+        <td>${ui.esc(t(`providers.access.${model.access_type || "unknown"}`))}</td>
         <td>${(model.tasks || []).map((task) => `<span class="tag">${ui.esc(task)}</span>`).join(" ")}</td>
         <td>${model.free ? `<span class="tag is-teal">${ui.esc(t("providers.freeApproved"))}</span>` : ""}</td>
         <td>${ui.esc(`${allowed}/${eligibility.length}`)}</td>
+        <td>${ui.esc(model.verification_status || "unverified")}</td>
+        <td>${model.ready ? `<span class="tag is-teal">${ui.esc(t("providers.modelReady"))}</span>` : `<span class="tag">${ui.esc(t("providers.modelNotReady"))}</span>`}</td>
         <td>${ui.esc(model.enabled ? t("common.enabled") : t("common.disabled"))}</td>
       </tr>`;
     })
@@ -2310,8 +3337,10 @@ async function providersView(token) {
             modelRows
               ? `<div class="table-wrap"><table><thead><tr>
                   <th>${ui.esc(t("common.model"))}</th><th>${ui.esc(t("common.provider"))}</th>
-                  <th>${ui.esc(t("common.tasks"))}</th><th>${ui.esc(t("providers.freeApproved"))}</th>
-                  <th>${ui.esc(t("providers.eligibility"))}</th><th>${ui.esc(t("common.status"))}</th>
+                  <th>${ui.esc(t("providers.access"))}</th><th>${ui.esc(t("common.tasks"))}</th>
+                  <th>${ui.esc(t("providers.freeApproved"))}</th><th>${ui.esc(t("providers.eligibility"))}</th>
+                  <th>${ui.esc(t("providers.verification"))}</th><th>${ui.esc(t("providers.modelReady"))}</th>
+                  <th>${ui.esc(t("common.status"))}</th>
                 </tr></thead><tbody>${modelRows}</tbody></table></div>`
               : ui.renderEmpty({
                   iconName: "providers",
@@ -2427,6 +3456,22 @@ async function handleGlobalAction(event) {
     await openClipPreview(target.dataset.clipId);
     return;
   }
+  if (action === "delete-video") {
+    await softDeleteSource(target.dataset.jobId, target);
+    return;
+  }
+  if (action === "delete-clip") {
+    await softDeleteClip(target.dataset.clipId, target);
+    return;
+  }
+  if (action === "restore-trash") {
+    await restoreTrashItem(target.dataset.kind, target.dataset.id, target);
+    return;
+  }
+  if (action === "purge-trash") {
+    await purgeTrashItem(target.dataset.kind, target.dataset.id, target);
+    return;
+  }
   if (action === "reload-providers") {
     ui.setBusy(target, true, t("common.loading"));
     try {
@@ -2442,6 +3487,77 @@ async function handleGlobalAction(event) {
   }
   if (action === "test-provider") {
     await testProvider(target.dataset.provider, target);
+    return;
+  }
+  if (action === "discover-nvidia") {
+    ui.setBusy(target, true, t("providers.discoveringNvidia"));
+    try {
+      const result = await api.discoverProviderModels("nvidia", true);
+      if (result?.ok) {
+        ui.toast(
+          t("providers.discoveredNvidia", {
+            models: ui.formatNumberLabel(result.models || 0),
+          }),
+          "success",
+        );
+      } else {
+        ui.toast(
+          t("providers.discoverFailed", {
+            message: result?.error || t("common.error"),
+          }),
+          "error",
+        );
+      }
+      renderRoute();
+      refreshSystem();
+    } catch (error) {
+      ui.setBusy(target, false);
+      ui.toast(
+        t("providers.discoverFailed", {
+          message: error.message || t("common.error"),
+        }),
+        "error",
+      );
+    }
+    return;
+  }
+  if (action === "provider-toggle") {
+    const enabled = target.dataset.enabled === "true";
+    ui.setBusy(target, true, t("common.loading"));
+    try {
+      await api.toggleProvider(target.dataset.provider, enabled);
+      ui.toast(t("providers.toggled", { provider: target.dataset.provider }), "success");
+      renderRoute();
+      refreshSystem();
+    } catch (error) {
+      ui.setBusy(target, false);
+      ui.toast(error.message || t("common.error"), "error");
+    }
+    return;
+  }
+  if (action === "skill-toggle") {
+    const enabled = target.dataset.enabled === "true";
+    ui.setBusy(target, true, t("common.loading"));
+    try {
+      await api.toggleSkill(target.dataset.skill, enabled);
+      ui.toast(t("skills.updated"), "success");
+      renderRoute();
+    } catch (error) {
+      ui.setBusy(target, false);
+      ui.toast(error.message || t("common.error"), "error");
+    }
+    return;
+  }
+  if (action === "skill-review") {
+    ui.setBusy(target, true, t("common.loading"));
+    try {
+      await api.reviewSkill(target.dataset.skill, true);
+      ui.toast(t("skills.reviewed"), "success");
+      renderRoute();
+    } catch (error) {
+      ui.setBusy(target, false);
+      ui.toast(error.message || t("common.error"), "error");
+    }
     return;
   }
   if (action === "create-clips") {
@@ -2529,6 +3645,87 @@ async function renderClipNow(clipId, button) {
   try {
     await api.renderClip(clipId);
     ui.toast(t("clips.renderStarted"), "success");
+    renderRoute();
+  } catch (error) {
+    ui.setBusy(button, false);
+    ui.toast(error.message || t("common.error"), "error");
+  }
+}
+
+async function softDeleteSource(jobId, button) {
+  if (!jobId) return;
+  const confirmed = await ui.confirmDialog(t("library.deleteConfirm"), {
+    title: t("library.deleteSource"),
+    confirmLabel: t("common.delete"),
+    danger: true,
+  });
+  if (!confirmed) return;
+  ui.setBusy(button, true, t("common.loading"));
+  try {
+    await api.deleteVideo(jobId);
+    ui.toast(t("library.movedToTrash", { count: 1 }), "success");
+    renderRoute();
+  } catch (error) {
+    ui.setBusy(button, false);
+    ui.toast(error.message || t("common.error"), "error");
+  }
+}
+
+async function softDeleteClip(clipId, button) {
+  if (!clipId) return;
+  const confirmed = await ui.confirmDialog(t("clips.deleteConfirm"), {
+    title: t("clips.deleteClip"),
+    confirmLabel: t("common.delete"),
+    danger: true,
+  });
+  if (!confirmed) return;
+  ui.setBusy(button, true, t("common.loading"));
+  try {
+    await api.deleteClip(clipId);
+    ui.toast(t("clips.movedToTrash", { count: 1 }), "success");
+    if (parseRoute().name === "clip") window.location.hash = "#/clips";
+    else renderRoute();
+  } catch (error) {
+    ui.setBusy(button, false);
+    ui.toast(error.message || t("common.error"), "error");
+  }
+}
+
+async function restoreTrashItem(kind, id, button) {
+  if (!kind || !id) return;
+  ui.setBusy(button, true, t("common.loading"));
+  try {
+    const result = await api.restoreTrash([{ kind, id }]);
+    if (result.errors?.length) {
+      ui.toast(result.errors[0].message || t("common.error"), "error");
+      ui.setBusy(button, false);
+      return;
+    }
+    ui.toast(t("trash.restored", { count: 1 }), "success");
+    renderRoute();
+  } catch (error) {
+    ui.setBusy(button, false);
+    ui.toast(error.message || t("common.error"), "error");
+  }
+}
+
+async function purgeTrashItem(kind, id, button) {
+  if (!kind || !id) return;
+  const confirmed = await ui.confirmDialog(t("trash.purgeOneConfirm"), {
+    title: t("trash.deleteForever"),
+    confirmLabel: t("trash.deleteForever"),
+    danger: true,
+  });
+  if (!confirmed) return;
+  ui.setBusy(button, true, t("common.loading"));
+  try {
+    const result = await api.purgeTrash([{ kind, id }]);
+    if (result.errors?.length) {
+      ui.toast(result.errors[0].message || t("common.error"), "error");
+      ui.setBusy(button, false);
+      return;
+    }
+    ui.toast(t("trash.purged", { count: 1 }), "success");
     renderRoute();
   } catch (error) {
     ui.setBusy(button, false);
@@ -2812,6 +4009,16 @@ async function createClipsFromForm(button) {
   const captions = Boolean(form.querySelector("#captions-toggle")?.checked);
   const captionLanguage = form.querySelector("#caption-language")?.value || null;
   const render = form.querySelector('input[name="render-mode"]:checked')?.value === "now";
+  const visualSettings = {
+    visual_enhancement: Boolean(form.querySelector("#visual-enhancement")?.checked),
+    intensity: form.querySelector("#visual-intensity")?.value || "balanced",
+    captions,
+    zoom: Boolean(form.querySelector("#visual-zoom")?.checked),
+    punch: Boolean(form.querySelector("#visual-punch")?.checked),
+    emphasis: Boolean(form.querySelector("#visual-emphasis")?.checked),
+    transitions: Boolean(form.querySelector("#visual-transitions")?.checked),
+    callouts: Boolean(form.querySelector("#visual-callouts")?.checked),
+  };
   if (!selected.length) {
     ui.toast(t("export.noSelection"), "warning");
     return;
@@ -2827,15 +4034,27 @@ async function createClipsFromForm(button) {
       return;
     }
   }
+  const editor = state.trimEditor;
+  let ranges = null;
+  if (editor) {
+    const validation = editor.validate(selected);
+    if (!validation.ok) {
+      editor.revealError(validation.index, validation.code);
+      ui.toast(validation.message || t("trim.invalid"), "warning");
+      return;
+    }
+    if (editor.hasCustomRanges(selected)) ranges = editor.rangesFor(selected);
+  }
   ui.setBusy(button, true, render ? t("common.renderNow") : t("export.creating"));
   try {
     const payload = await api.createClips(jobId, {
-      highlight_indices: selected,
+      ...(ranges ? { ranges } : { highlight_indices: selected }),
       formats,
       quality,
       fit,
       captions,
       caption_language: captions ? captionLanguage || null : null,
+      visual_settings: visualSettings,
       render,
     });
     const count = payload.jobs?.length || selected.length * formats.length;

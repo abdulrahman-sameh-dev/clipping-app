@@ -1,0 +1,12 @@
+{
+  "id": "visual-callouts",
+  "name": "Contextual Visual Callouts",
+  "version": "1.0.0",
+  "category": "visual",
+  "description": "Plans one lightweight, top-safe-area heading or key phrase derived from the highlight title.",
+  "instructions": "Keep callouts short and sparse. Never cover faces or captions. Arabic text must be rendered through libass, never manually reversed.",
+  "tools": ["composition.callout_plan"],
+  "permissions": {"network": false, "filesystem": false, "subprocess": false},
+  "timeout_seconds": 20,
+  "enabled_by_default": true
+}

@@ -76,6 +76,13 @@ async function runChecks(url) {
   const browser = await chromium.launch({ headless: true, executablePath });
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   const errors = [];
+  const clipJobRequests = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname === "/api/clip-jobs" && url.searchParams.get("limit") === "200") {
+      clipJobRequests.push(request.url());
+    }
+  });
   page.on("console", (message) => {
     if (message.type() === "error") errors.push(message.text());
   });
@@ -86,7 +93,7 @@ async function runChecks(url) {
     await page.waitForSelector("main h1");
     assert.equal(new URL(page.url()).pathname, "/ui/");
     assert.equal(await page.locator("main h1").textContent(), "Studio overview");
-    assert.equal(await page.locator(".nav-link").count(), 5);
+    assert.equal(await page.locator(".nav-link").count(), 7);
 
     await page.locator("#lang-toggle").click();
     await page.waitForFunction(() => document.documentElement.dir === "rtl");
@@ -109,6 +116,15 @@ async function runChecks(url) {
       await page.goto(`${url}/ui/${route}`, { waitUntil: "networkidle" });
       assert.equal(await page.locator("main h1").textContent(), heading, route);
       assert.equal(await page.locator(".error-state").count(), 0, route);
+      if (route === "#/clips") {
+        const idleRequests = clipJobRequests.length;
+        await page.waitForTimeout(4500);
+        assert.equal(
+          clipJobRequests.length,
+          idleRequests,
+          "idle Clips page should not poll clip jobs",
+        );
+      }
     }
 
     await page.setViewportSize({ width: 390, height: 844 });

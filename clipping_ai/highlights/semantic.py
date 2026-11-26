@@ -8,7 +8,7 @@ from clipping_ai.analysis.config import HighlightSettings
 from clipping_ai.highlights.models import ContentType, Highlight
 from clipping_ai.schemas import TranscriptResult, TranscriptSegment
 
-__all__ = ["consolidate_highlights"]
+__all__ = ["consolidate_highlights", "split_long_highlights"]
 
 _COMPLETE_ENDINGS = (".", "!", "?", "؟", "。", "！", "？", "…")
 _INCOMPLETE_ENDINGS = (",", "،", "؛", ";", ":", "—", "-")
@@ -365,6 +365,101 @@ def _merge_group(
         detection_signals=signals,
         source=best.source if len(sources) == 1 else "consolidated",
     )
+
+
+
+
+def split_long_highlights(
+    highlights: list[Highlight],
+    transcript: TranscriptResult | None,
+    config: HighlightSettings,
+) -> list[Highlight]:
+    """Split only excessively long moments at transcript boundaries.
+
+    The preferred target is a soft range. Highlights already within the target
+    plus tolerance are left untouched, and a single long transcript segment is
+    never cut mid-sentence.
+    """
+    target_min = config.target_clip_seconds_min
+    target_max = config.target_clip_seconds_max
+    if (
+        target_min is None
+        or target_max is None
+        or transcript is None
+        or not transcript.segments
+        or not highlights
+    ):
+        return highlights
+
+    max_allowed = target_max + config.target_duration_tolerance_seconds
+    result: list[Highlight] = []
+    for highlight in highlights:
+        duration = highlight.end_time - highlight.start_time
+        if duration <= max_allowed:
+            result.append(highlight)
+            continue
+        segments = _segments_between(
+            transcript, highlight.start_time, highlight.end_time
+        )
+        if len(segments) < 2:
+            result.append(highlight)
+            continue
+
+        chunks: list[list[TranscriptSegment]] = []
+        current: list[TranscriptSegment] = []
+        for segment in segments:
+            if current:
+                current_duration = current[-1].end - current[0].start
+                candidate_duration = segment.end - current[0].start
+                if current_duration >= target_min and candidate_duration > target_max:
+                    chunks.append(current)
+                    current = []
+            current.append(segment)
+        if current:
+            chunks.append(current)
+        if len(chunks) < 2:
+            result.append(highlight)
+            continue
+
+        if len(chunks) > 1:
+            last_duration = chunks[-1][-1].end - chunks[-1][0].start
+            previous_duration = chunks[-2][-1].end - chunks[-2][0].start
+            if (
+                last_duration < target_min
+                and previous_duration + last_duration <= max_allowed
+            ):
+                chunks[-2].extend(chunks.pop())
+
+        for index, chunk in enumerate(chunks, start=1):
+            start = chunk[0].start
+            end = chunk[-1].end
+            if index == 1:
+                start = min(start, highlight.start_time)
+            if index == len(chunks):
+                end = max(end, highlight.end_time)
+            signals = dict(highlight.detection_signals)
+            signals["duration_split"] = 1.0
+            signals["original_duration"] = round(duration, 3)
+            title = highlight.title
+            if index > 1 and title:
+                title = f"{title} — part {index}"
+            result.append(
+                highlight.model_copy(
+                    update={
+                        "start_time": round(start, 3),
+                        "end_time": round(end, 3),
+                        "title": title,
+                        "selection_reason": (
+                            "Split from a longer coherent moment to stay close to the "
+                            f"{target_min:g}-{target_max:g}s target. "
+                            f"{highlight.selection_reason}"
+                        ).strip(),
+                        "transcript_segments": chunk,
+                        "detection_signals": signals,
+                    }
+                )
+            )
+    return sorted(result, key=lambda item: item.start_time)
 
 
 def consolidate_highlights(

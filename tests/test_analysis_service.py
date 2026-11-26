@@ -336,3 +336,123 @@ def test_store_migrates_existing_video_jobs_table(tmp_path):
         "highlight_at",
     } <= columns
     assert store.count() == 0
+
+
+class PreparedFakeManager(FakeManager):
+    def __init__(self, *, fail_index: int | None = None) -> None:
+        super().__init__()
+        self.fail_index = fail_index
+        self.chunk_calls: list[int] = []
+
+    def can_transcribe_prepared_chunks(self, **_: object) -> bool:
+        return True
+
+    def transcribe_chunk(self, chunk, **kwargs):
+        self.chunk_calls.append(chunk.index)
+        if self.fail_index == chunk.index:
+            raise AIError(
+                ErrorCategory.NETWORK_TIMEOUT,
+                "prepared chunk timed out",
+                retryable=True,
+            )
+        start = float(chunk.offset)
+        end = start + float(chunk.duration)
+        return {
+            "provider": "fake",
+            "model": "fake-model",
+            "transcript": {
+                "text": f"chunk {chunk.index}",
+                "language": "en",
+                "duration": float(chunk.duration),
+                "segments": [{"start": start, "end": end, "text": f"chunk {chunk.index}"}],
+            },
+        }
+
+    def transcribe(self, *args, **kwargs):
+        self.transcribe_calls += 1
+        raise AssertionError("whole-file transcription should not run")
+
+
+@requires_ffmpeg
+def test_transcribe_uses_phase5b_prepared_chunks(tmp_path):
+    video = make_service(tmp_path)
+    job = video.prepare_local(make_test_video(tmp_path / "sample.mp4", duration=2.0))
+    assert len(job.audio_chunks) == 2
+    manager = PreparedFakeManager()
+    service = _analysis_service(tmp_path, video, manager)
+
+    updated = service.transcribe(job.id)
+
+    assert manager.chunk_calls == [0, 1]
+    assert manager.transcribe_calls == 0
+    assert updated.transcript is not None
+    assert updated.transcript.text == "chunk 0 chunk 1"
+    assert [segment.start for segment in updated.transcript.segments] == [0.0, 1.0]
+    assert updated.transcript_provider == "fake"
+    assert updated.transcript_model == "fake-model"
+
+
+@requires_ffmpeg
+def test_transcribe_resumes_after_interrupted_prepared_chunk(tmp_path):
+    video = make_service(tmp_path)
+    job = video.prepare_local(make_test_video(tmp_path / "sample.mp4", duration=2.0))
+    first = PreparedFakeManager(fail_index=1)
+    service = _analysis_service(tmp_path, video, first)
+
+    with pytest.raises(AIError):
+        service.transcribe(job.id)
+
+    assert first.chunk_calls == [0, 1]
+    assert video.store.require(job.id).transcript is None
+
+    second = PreparedFakeManager()
+    resumed = _analysis_service(tmp_path, video, second).transcribe(job.id)
+
+    assert second.chunk_calls == [1]
+    assert second.transcribe_calls == 0
+    assert resumed.transcript is not None
+    assert resumed.transcript.text == "chunk 0 chunk 1"
+
+
+@requires_ffmpeg
+def test_transcribe_falls_back_to_whole_file_when_chunks_are_missing(tmp_path):
+    video = make_service(tmp_path)
+    job = video.prepare_local(make_test_video(tmp_path / "sample.mp4", duration=2.0))
+    job.audio_chunks[1].path.unlink()
+
+    class FallbackManager(FakeManager):
+        def can_transcribe_prepared_chunks(self, **_: object) -> bool:
+            return True
+
+        def transcribe_chunk(self, chunk, **kwargs):
+            raise AssertionError("invalid manifest should not reach runner")
+
+    manager = FallbackManager()
+    updated = _analysis_service(tmp_path, video, manager).transcribe(job.id)
+
+    assert manager.transcribe_calls == 1
+    assert updated.transcript is not None
+
+
+@requires_ffmpeg
+def test_transcribe_rebuilds_missing_final_transcript_without_provider_calls(tmp_path):
+    video = make_service(tmp_path)
+    job = video.prepare_local(make_test_video(tmp_path / "sample.mp4", duration=2.0))
+    service = _analysis_service(tmp_path, video, PreparedFakeManager())
+    service.transcribe(job.id)
+    video.store.update(
+        job.id,
+        transcript=None,
+        transcript_provider=None,
+        transcript_model=None,
+    )
+
+    class NoProviderManager(PreparedFakeManager):
+        def transcribe_chunk(self, chunk, **kwargs):
+            raise AssertionError("completed chunks should be reused from cache")
+
+    resumed = _analysis_service(tmp_path, video, NoProviderManager()).transcribe(job.id)
+
+    assert resumed.transcript is not None
+    assert resumed.transcript.text == "chunk 0 chunk 1"
+    assert resumed.transcript_provider == "fake"

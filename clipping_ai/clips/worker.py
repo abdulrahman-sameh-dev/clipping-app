@@ -27,6 +27,7 @@ class ClipWorker:
         if self.running:
             return
         self.service.recover_interrupted()
+        self.service.resume_pending_metadata()
         self._stop.clear()
         self._thread = threading.Thread(
             target=self._loop,

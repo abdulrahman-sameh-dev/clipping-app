@@ -14,7 +14,10 @@ from tests.helpers import make_manager
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_real_config_loads_expected_registry():
+def test_real_config_loads_expected_registry(monkeypatch):
+    from clipping_ai.providers import nvidia_catalog
+
+    monkeypatch.setattr(nvidia_catalog, "cached_model_dicts", lambda _config_dir: [])
     registry = Registry.load(PROJECT_ROOT / "config")
     assert len(registry.models) == 11
     assert registry.get_model("gemini-3.8-flash").free is True

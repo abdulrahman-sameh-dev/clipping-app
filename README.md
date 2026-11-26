@@ -14,7 +14,10 @@ It never sends requests to paid models: a model must be explicitly registered wi
 
 - Free-only allow-list policy with a last-line guard before every provider call.
 - Text tasks through LiteLLM: content analysis, highlight detection, clip scoring,
-  titles, descriptions, translation, and caption refinement.
+  titles, descriptions, translation, and caption refinement. An optional generic
+  OpenAI-compatible adapter supports explicitly configured free gateways. NVIDIA NIM
+  free endpoints are discovered from NVIDIA's structured catalog, filtered by access
+  type and task capability, and shown as Not Ready until a bounded smoke test succeeds.
 - Speech-to-text through Groq Whisper, with automatic ffmpeg chunking and a resumable
   SQLite chunk cache.
 - Optional local `whisper.cpp` speech provider. Nothing is downloaded automatically;
@@ -26,6 +29,8 @@ It never sends requests to paid models: a model must be explicitly registered wi
   classification distinguishes podcast, educational, general, gaming, live, mixed,
   and unknown content with confidence-gated evidence. Highlights are suggestions
   only: original source video and speaker audio are preserved.
+- Highlight suggestions prefer 30-45s short-form moments while preserving sentence
+  completeness. Overly long moments are split only at transcript boundaries.
 - Highlight clips can be rendered from the original source into vertical (9:16),
   square (1:1), and landscape (16:9) MP4 files. Captions are optional per clip and
   use ASS/libass with Arabic shaping and RTL support.
@@ -36,8 +41,16 @@ It never sends requests to paid models: a model must be explicitly registered wi
   resolution-scaled font and a semi-transparent background box; `Encoding=-1` lets
   libass handle whole-text Arabic bidi. Landscape sources default to a blurred
   vertical fit unless an explicit fit is requested.
-- Task-based routing, bounded retries, rate-limit handling, fallback, and local usage
-  tracking in SQLite.
+- Content-aware visual composition with per-clip settings: visual enhancement can be
+  disabled, intensity and category toggles are persisted, and at most one restrained
+  top-safe-area callout is derived from the highlight title. Callouts are rendered as
+  ASS through libass, never by manually reversing Arabic text.
+- Data-only Skills/Tools infrastructure: built-in manifests shape captions, emphasis,
+  and callouts; external manifests are discovered but remain disabled until an
+  explicit review. Skills can only call registered built-in tools, with per-skill
+  permissions and timeouts.
+- Task-based routing, bounded retries, rate-limit handling, fallback, provider/model
+  enable toggles, and local usage tracking in SQLite.
 - Video ingestion from local uploads or `yt-dlp` URLs, with safe filenames, size and
   format validation, duplicate detection, and persistent jobs.
 - Normalised ffprobe metadata plus ffmpeg audio extraction and configurable,
@@ -47,9 +60,19 @@ It never sends requests to paid models: a model must be explicitly registered wi
   per-clip captions, cancellation, retry, cleanup, and a second CPU-friendly worker.
 - A single CPU-friendly background worker per job type, retry/cancel controls, and a
   local API bound to loopback by default, plus a CLI.
+- Automatic publishing metadata: bounded batches generated from clip-range context,
+  free-provider quota failover with cooldown, deterministic local fallback, editable
+  fields, protected manual edits, regeneration, and a manual published checkbox with
+  timestamp.
+- Source publishing completion: `All clips published` persists on the source with a
+  timestamp they clear on uncheck, published/total counts, completed/incomplete
+  filters, and an automatic reset when new clips are extracted.
+- Source and clip deletion with a unified Trash: soft delete, restore, permanent
+  delete, and empty trash. Source deletion never removes extracted clips.
 - A packaged vanilla studio UI at `/ui/` with dashboard, library, analysis, highlight
-  selection, export, clip preview, jobs, and provider views; English/Arabic RTL and
-  responsive mobile navigation with no frontend build step.
+  selection, export, clip detail, clip preview, trash, jobs, provider, and skills
+  views; English/Arabic RTL and responsive mobile navigation with no frontend build
+  step.
 
 ## Install on EndeavourOS
 
@@ -201,20 +224,33 @@ packaged vanilla frontend; there is no separate Node build or dev server. `/`
 redirects to `/ui/`.
 
 The frontend has no runtime npm dependencies. `package.json` exists only for the
-Playwright end-to-end tests, so `npm install` is not required to use the studio.
+Playwright end-to-end tests and Node polling tests, so `npm install` is not required
+to use the studio.
 
 The studio covers the complete local workflow:
 
 - Dashboard: service/provider readiness, active pipeline state, and recent media.
-- Video library: upload, URL import, search, status filters, retry, and cancel.
+- Video library: upload, URL import, search, status filters, selection, bulk soft
+  delete, retry, and cancel.
 - Analysis: source metadata, transcript, transcript search, classification,
   highlight suggestions, and selection for export.
-- Export: choose detected highlights, formats, quality, fit, and optional
-  Arabic/English captions, then queue clip jobs.
-- Clip library: preview rendered MP4s, download, render, retry, and cancel.
+- Export: choose detected highlights, formats, quality, fit, optional
+  Arabic/English captions, and visual enhancement intensity/categories, then queue
+  clip jobs.
+- Clip library: preview rendered MP4s, generated title/metadata, source publishing
+  completion controls and counts, status/completion filters, selection/bulk delete,
+  and links to clip detail. Live progress polling is
+  scoped to active clips, pauses while the tab is hidden, and stops when the page is idle.
+- Clip detail: rendered player, download, editable title/description/hashtags,
+  regenerate, copy fields, publishing status, source link, and delete.
+- Trash: mixed source/clip list with deletion dates, selection, restore, permanent
+  delete, and empty trash.
 - Jobs monitor: combined video/clip job state, filters, and recovery actions.
-- Providers: local provider/model inventory, readiness, usage, test connection, and
-  configuration reload.
+- Providers: local provider/model inventory, readiness, usage, test connection,
+  enable/disable toggles, configuration reload, and NVIDIA Free Endpoint discovery
+  with explicit API/verification states.
+- Skills: installed manifests, review state, permissions, registered tools, and safe
+  enable/disable controls.
 
 The UI is same-origin by default. It can read an alternate local API base from
 `clipping.apiBase` in browser local storage before loading, but that origin must be
@@ -225,7 +261,8 @@ and the full interface direction (`ltr`/`rtl`); the choice persists locally.
 Clip preview uses the existing `GET /api/clip-jobs/<clip_id>/download` endpoint.
 There is no source-video streaming endpoint, and the UI does not add custom trim
 ranges: clips use the detected highlight boundaries exposed by the API. The trim note
-in analysis is informational, not a hidden trim control.
+in analysis is informational, not a hidden trim control. Publishing is manual only;
+the studio does not connect to YouTube, Facebook, or any upload API.
 
 Frontend smoke tests use Playwright against a temporary local backend:
 
@@ -386,6 +423,23 @@ worker uses the existing `data/jobs.db` database and a `clip_jobs` table. Tempor
 files are cleaned on success, failure, and cancellation; interrupted `processing`
 jobs are requeued when the service starts. Rendering is local CPU work and does not
 call any paid service.
+
+When metadata generation is enabled, creating clips schedules bounded
+`title_generation` batches for the source using only clip-range transcript/highlight
+context. Metadata can complete before rendering and never blocks the clip pipeline.
+Every response item is mapped by clip ID; omitted or failed items are retried in
+smaller batches, then receive deterministic local metadata when transcript context is
+available. Free-quota exhaustion triggers failover to another eligible free provider
+and a provider cooldown; paid providers are never used. Manual edits are marked
+`manually_edited` and are not overwritten unless regeneration is explicitly forced.
+
+Normal deletes move sources or clips to Trash (`deleted_at`). Restore and permanent
+delete are available per item or in batches. Permanent source deletion removes only
+the source job directory; rendered clips remain. Permanent clip deletion removes
+only files owned by that clip. Trash has no automatic expiry. See the API table in
+`CONFIGURATION.md` for the metadata, source/clip publish, delete, restore, and trash
+endpoints. Source publishing completion is manual; unchecked clears the timestamp,
+and extracting new clips resets it to incomplete.
 
 Gaming and live-stream detection use transcript-free evidence: sudden audio peaks,
 silence-to-sound transitions, scene changes, motion, duration, and filename/URL

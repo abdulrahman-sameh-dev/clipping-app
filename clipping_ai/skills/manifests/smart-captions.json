@@ -1,0 +1,12 @@
+{
+  "id": "smart-captions",
+  "name": "Smart Caption Composition",
+  "version": "1.0.0",
+  "category": "caption",
+  "description": "Builds phrase-level caption cues from existing word timestamps and highlights important words without re-transcribing.",
+  "instructions": "Use only the existing transcript, word timestamps and highlight metadata. Keep phrases short, preserve RTL shaping and never translate unless a target language is explicitly requested.",
+  "tools": ["composition.caption_plan"],
+  "permissions": {"network": false, "filesystem": false, "subprocess": false},
+  "timeout_seconds": 20,
+  "enabled_by_default": true
+}

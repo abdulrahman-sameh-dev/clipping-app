@@ -5,13 +5,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from clipping_ai.analysis.config import HighlightSettings
+from clipping_ai.analysis.transcription import stage_retryable
 from clipping_ai.errors import AIError
 from clipping_ai.highlights.candidates import (
     Candidate,
     _align_to_transcript,
     candidate_summary,
 )
-from clipping_ai.highlights.models import ContentType, Highlight, MediaSignals
+from clipping_ai.highlights.models import ContentType, Highlight, LlmOutcome, MediaSignals
 from clipping_ai.schemas import TranscriptResult
 
 if TYPE_CHECKING:
@@ -43,23 +44,28 @@ def _clamp_range(
     return round(start, 3), round(end, 3)
 
 
-def refine_with_llm(
-    manager: ProviderManager | None,
+def llm_instructions() -> str:
+    return (
+        "Use only the supplied transcript and candidate windows. Choose complete, meaningful "
+        "moments and preserve original start/end timestamps. Prefer one full explanation over "
+        "several short fragments. If adjacent candidate windows belong to the same example or "
+        "argument, return one combined range that covers the full idea. Do not merge unrelated "
+        "ideas. Candidate windows are hints, not limits. A self-contained short statement may "
+        "stay short, while a longer explanation may span a minute or more. For gaming or live "
+        "content, use audio/video activity windows even when speech is sparse. Do not invent "
+        "events or words. Return at most the requested number of highlights."
+    )
+
+
+def build_llm_payload(
     *,
     transcript: TranscriptResult,
     candidates: list[Candidate],
     content_type: ContentType,
     signals: MediaSignals | None,
     config: HighlightSettings,
-    provider: str | None = None,
-    model: str | None = None,
-) -> tuple[list[Highlight], str | None]:
-    if manager is None or not config.use_llm or not candidates:
-        return [], None
-
+) -> tuple[str, dict[str, Any]]:
     text = transcript.text.strip()
-    if not text:
-        return [], "No transcript text was available for LLM refinement."
     limited_text = text[: config.llm_max_transcript_chars]
     payload: dict[str, Any] = {
         "content_type": content_type.value,
@@ -76,30 +82,18 @@ def refine_with_llm(
         "min_clip_seconds": config.min_clip_seconds,
         "max_clip_seconds": config.max_clip_seconds,
     }
-    instructions = (
-        "Use only the supplied transcript and candidate windows. Choose complete, meaningful "
-        "moments and preserve original start/end timestamps. Prefer one full explanation over "
-        "several short fragments. If adjacent candidate windows belong to the same example or "
-        "argument, return one combined range that covers the full idea. Do not merge unrelated "
-        "ideas. Candidate windows are hints, not limits. A self-contained short statement may "
-        "stay short, while a longer explanation may span a minute or more. For gaming or live "
-        "content, use audio/video activity windows even when speech is sparse. Do not invent "
-        "events or words. Return at most the requested number of highlights."
-    )
-    try:
-        response = manager.analyze(
-            "highlight_detection",
-            text=limited_text,
-            instructions=instructions,
-            provider=provider,
-            model=model,
-            payload=payload,
-        )
-    except AIError as exc:
-        return [], f"LLM refinement failed: {exc.message}"
+    return limited_text, payload
 
-    data = response.get("data") if isinstance(response, dict) else None
-    raw_highlights = data.get("highlights") if isinstance(data, dict) else None
+
+def parse_llm_response(
+    response_data: dict[str, Any] | None,
+    *,
+    transcript: TranscriptResult,
+    candidates: list[Candidate],
+    signals: MediaSignals | None,
+    config: HighlightSettings,
+) -> tuple[list[Highlight], str | None]:
+    raw_highlights = response_data.get("highlights") if isinstance(response_data, dict) else None
     if not isinstance(raw_highlights, list):
         return [], "LLM refinement returned no usable highlights."
 
@@ -166,3 +160,95 @@ def refine_with_llm(
             )
         )
     return highlights, None
+
+
+def refine_with_llm_outcome(
+    manager: ProviderManager | None,
+    *,
+    transcript: TranscriptResult,
+    candidates: list[Candidate],
+    content_type: ContentType,
+    signals: MediaSignals | None,
+    config: HighlightSettings,
+    provider: str | None = None,
+    model: str | None = None,
+) -> LlmOutcome:
+    if manager is None or not config.use_llm or not candidates:
+        return LlmOutcome()
+    text = transcript.text.strip()
+    if not text:
+        return LlmOutcome(error="No transcript text was available for LLM refinement.")
+
+    limited_text, payload = build_llm_payload(
+        transcript=transcript,
+        candidates=candidates,
+        content_type=content_type,
+        signals=signals,
+        config=config,
+    )
+    try:
+        response = manager.analyze(
+            "highlight_detection",
+            text=limited_text,
+            instructions=llm_instructions(),
+            provider=provider,
+            model=model,
+            payload=payload,
+        )
+    except AIError as exc:
+        return LlmOutcome(
+            error=f"LLM refinement failed: {exc.message}",
+            provider=exc.provider or provider,
+            model=exc.model or model,
+            applied=True,
+            failed=True,
+            retryable=stage_retryable(exc),
+            retry_after=exc.retry_after,
+        )
+
+    response_data = response.get("data") if isinstance(response, dict) else None
+    response_data = response_data if isinstance(response_data, dict) else None
+    highlights, error = parse_llm_response(
+        response_data,
+        transcript=transcript,
+        candidates=candidates,
+        signals=signals,
+        config=config,
+    )
+    response_provider = response.get("provider") if isinstance(response, dict) else None
+    response_model = response.get("model") if isinstance(response, dict) else None
+    invalid_response = error is not None
+    return LlmOutcome(
+        highlights=highlights,
+        error=error,
+        response_data=response_data,
+        provider=str(response_provider) if response_provider else provider,
+        model=str(response_model) if response_model else model,
+        applied=True,
+        failed=invalid_response,
+        retryable=invalid_response,
+    )
+
+
+def refine_with_llm(
+    manager: ProviderManager | None,
+    *,
+    transcript: TranscriptResult,
+    candidates: list[Candidate],
+    content_type: ContentType,
+    signals: MediaSignals | None,
+    config: HighlightSettings,
+    provider: str | None = None,
+    model: str | None = None,
+) -> tuple[list[Highlight], str | None]:
+    outcome = refine_with_llm_outcome(
+        manager,
+        transcript=transcript,
+        candidates=candidates,
+        content_type=content_type,
+        signals=signals,
+        config=config,
+        provider=provider,
+        model=model,
+    )
+    return outcome.highlights, outcome.error

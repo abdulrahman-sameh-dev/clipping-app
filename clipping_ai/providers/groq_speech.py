@@ -89,6 +89,53 @@ class GroqSpeechProvider(BaseSpeechProvider):
         return True, "ok"
 
     # -------------------------------------------------------------- transcription
+    @property
+    def supports_prepared_chunks(self) -> bool:
+        return True
+
+    def transcribe_chunk(
+        self,
+        entry: ModelEntry,
+        chunk: AudioChunk,
+        *,
+        language: str | None = None,
+        word_timestamps: bool = True,
+        prompt: str | None = None,
+        timeout: float | None = None,
+    ) -> TranscriptResult:
+        """Transcribe an already prepared chunk without re-splitting the source."""
+        if not entry.free or not entry.is_enabled():
+            raise policy_violation(
+                "Blocked: only explicitly approved, enabled free models may execute.",
+                provider=entry.provider,
+                model=entry.id,
+            )
+        path = Path(chunk.path)
+        if not path.exists() or not path.is_file():
+            raise AIError(
+                ErrorCategory.INVALID_REQUEST,
+                f"Audio chunk does not exist: {path}",
+                provider=self.provider_id,
+                model=entry.id,
+                retryable=False,
+            )
+        if path.stat().st_size <= 0:
+            raise AIError(
+                ErrorCategory.INVALID_REQUEST,
+                f"Audio chunk is empty: {path}",
+                provider=self.provider_id,
+                model=entry.id,
+                retryable=False,
+            )
+        return self._transcribe_chunk(
+            entry,
+            chunk,
+            language=language,
+            word_timestamps=word_timestamps,
+            prompt=prompt,
+            timeout=timeout,
+        )
+
     def transcribe(
         self,
         entry: ModelEntry,

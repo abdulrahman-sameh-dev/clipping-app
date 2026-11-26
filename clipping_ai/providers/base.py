@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from clipping_ai.audio import AudioChunk
+from clipping_ai.errors import AIError, ErrorCategory
 from clipping_ai.registry import ModelEntry, ProviderConfig
 from clipping_ai.schemas import TranscriptResult
 
@@ -83,6 +85,34 @@ class BaseSpeechProvider(ABC):
         prompt: str | None = None,
         timeout: float | None = None,
     ) -> TranscriptResult: ...
+
+    @property
+    def supports_prepared_chunks(self) -> bool:
+        """Whether ``transcribe_chunk`` can process an externally prepared chunk."""
+        return False
+
+    def transcribe_chunk(
+        self,
+        entry: ModelEntry,
+        chunk: AudioChunk,
+        *,
+        language: str | None = None,
+        word_timestamps: bool = True,
+        prompt: str | None = None,
+        timeout: float | None = None,
+    ) -> TranscriptResult:
+        """Transcribe one prepared chunk, applying its global offset.
+
+        Providers that cannot accept a caller-owned chunk keep using
+        ``transcribe`` and return ``supports_prepared_chunks = False``.
+        """
+        raise AIError(
+            ErrorCategory.UNSUPPORTED_CAPABILITY,
+            f"Provider '{self.provider_id}' does not support prepared audio chunks.",
+            provider=self.provider_id,
+            retryable=False,
+            details={"reason": "prepared_chunks_unsupported"},
+        )
 
     @abstractmethod
     def test_connection(self, entry: ModelEntry | None = None) -> ConnectionResult: ...

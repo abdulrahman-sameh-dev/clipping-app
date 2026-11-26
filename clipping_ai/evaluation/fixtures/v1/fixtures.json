@@ -1,0 +1,263 @@
+{
+  "version": 1,
+  "labels_are_synthetic": true,
+  "interpretation_warning": "All fixture transcripts, topics, and gold spans are synthetic or manually authored evaluation annotations. They are not human judgments or real-world performance measurements.",
+  "annotation_rules": [
+    "A gold span contains one self-contained idea with an explicit beginning and end.",
+    "Gold spans use only absolute source timestamps; no offset is applied.",
+    "Adjacent distinct ideas receive separate spans when each can stand alone.",
+    "Gold spans may be sparse because the corpus measures discovery coverage, not transcription completeness.",
+    "Topic labels are diagnostic annotations only and are never supplied to production ranking.",
+    "Synthetic labels reflect the authored scenario, not objectively correct human ground truth."
+  ],
+  "fixtures": [
+    {
+      "fixture_id": "fixture-long-multitopic",
+      "content_type": "podcast",
+      "language": "en",
+      "duration": 3600,
+      "segments": [
+        {"id": 1, "start": 0, "end": 45, "text": "Welcome to the show. Today we discuss careers and early decisions."},
+        {"id": 2, "start": 300, "end": 350, "text": "The first topic is why learning a tool matters more than memorizing it."},
+        {"id": 3, "start": 900, "end": 955, "text": "We move to artificial intelligence and what changes when models become cheaper."},
+        {"id": 4, "start": 1800, "end": 1860, "text": "The central ethical question is who benefits when automation removes routine work."},
+        {"id": 5, "start": 3300, "end": 3360, "text": "A listener asks how to keep curiosity alive during a long career."},
+        {"id": 6, "start": 3540, "end": 3590, "text": "The closing answer is that curiosity needs protected time and honest feedback."}
+      ],
+      "gold_spans": [
+        {"start": 300, "end": 350, "topic": "learning", "label": "tool mastery"},
+        {"start": 900, "end": 955, "topic": "ai", "label": "cheap models"},
+        {"start": 1800, "end": 1860, "topic": "ethics", "label": "automation benefits"},
+        {"start": 3300, "end": 3360, "topic": "career", "label": "curiosity question"},
+        {"start": 3540, "end": 3590, "topic": "career", "label": "curiosity answer"}
+      ],
+      "topic_labels": ["learning", "ai", "ethics", "career"],
+      "edge_cases": ["long_multitopic", "late_moment", "topic_labels"],
+      "annotation_notes": ["Important moments are spread across a 60 minute timeline."]
+    },
+    {
+      "fixture_id": "fixture-educational-continuous",
+      "content_type": "educational",
+      "language": "en",
+      "duration": 900,
+      "segments": [
+        {"id": 1, "start": 0, "end": 80, "text": "Today we explain how derivatives measure change."},
+        {"id": 2, "start": 90, "end": 170, "text": "A derivative gives the slope at one exact point."},
+        {"id": 3, "start": 180, "end": 300, "text": "This means the derivative of position is velocity and the explanation connects the idea to motion."},
+        {"id": 4, "start": 310, "end": 430, "text": "We can estimate the slope by taking smaller intervals."},
+        {"id": 5, "start": 440, "end": 560, "text": "The chain rule explains how to differentiate one function inside another."},
+        {"id": 6, "start": 570, "end": 690, "text": "This example shows why order matters in a composite function."},
+        {"id": 7, "start": 700, "end": 880, "text": "We finish by checking units and interpreting the result."}
+      ],
+      "gold_spans": [
+        {"start": 180, "end": 300, "topic": "derivatives", "label": "velocity explanation"},
+        {"start": 440, "end": 560, "topic": "chain_rule", "label": "chain rule definition"}
+      ],
+      "topic_labels": ["derivatives", "chain_rule"],
+      "edge_cases": ["continuous_explanation", "topic_labels"],
+      "annotation_notes": ["The explanation is continuous and does not rely on loud audio or scene changes."]
+    },
+    {
+      "fixture_id": "fixture-religious-lesson-context",
+      "content_type": "educational",
+      "language": "en",
+      "duration": 720,
+      "segments": [
+        {"id": 1, "start": 0, "end": 90, "text": "The lesson begins by explaining why context matters before applying any ruling."},
+        {"id": 2, "start": 100, "end": 190, "text": "The teacher says a statement must be read with its surrounding discussion."},
+        {"id": 3, "start": 200, "end": 330, "text": "This means the meaning depends on the question being asked and the evidence available."},
+        {"id": 4, "start": 340, "end": 430, "text": "A student asks whether a short quote can carry the full argument."},
+        {"id": 5, "start": 440, "end": 580, "text": "The answer explains that attribution and context protect against overconfident interpretation."},
+        {"id": 6, "start": 590, "end": 700, "text": "The lesson closes by separating what is known from what is uncertain."}
+      ],
+      "gold_spans": [
+        {"start": 200, "end": 330, "topic": "context", "label": "context and evidence"},
+        {"start": 440, "end": 580, "topic": "attribution", "label": "attribution warning"}
+      ],
+      "topic_labels": ["context", "attribution"],
+      "edge_cases": ["religious_context", "continuous_explanation", "topic_labels"],
+      "annotation_notes": [
+        "No real scripture, scholar, or ruling is represented; this is a synthetic lesson structure.",
+        "Gold spans include the surrounding context needed to avoid misleading short clips."
+      ]
+    },
+    {
+      "fixture_id": "fixture-general-mixed",
+      "content_type": "mixed",
+      "language": "en",
+      "duration": 600,
+      "segments": [
+        {"id": 1, "start": 0, "end": 60, "text": "This recording mixes a conversation, a walk, and a short tutorial."},
+        {"id": 2, "start": 90, "end": 150, "text": "The reason the first tool failed is that the input was incomplete."},
+        {"id": 3, "start": 180, "end": 250, "text": "On the walk, the speaker notices an unexpected pattern in the crowd."},
+        {"id": 4, "start": 300, "end": 360, "text": "The tutorial explains how to verify the result with a second source."},
+        {"id": 5, "start": 480, "end": 540, "text": "The closing reflection says the process matters more than the final answer."}
+      ],
+      "gold_spans": [
+        {"start": 90, "end": 150, "topic": "debug", "label": "failure reason"},
+        {"start": 300, "end": 360, "topic": "verification", "label": "second source"},
+        {"start": 480, "end": 540, "topic": "reflection", "label": "process over answer"}
+      ],
+      "topic_labels": ["debug", "verification", "reflection"],
+      "edge_cases": ["mixed_content", "topic_labels"],
+      "annotation_notes": ["No single content profile dominates the fixture."]
+    },
+    {
+      "fixture_id": "fixture-arabic-rtl",
+      "content_type": "educational",
+      "language": "ar",
+      "duration": 720,
+      "segments": [
+        {"id": 1, "start": 0, "end": 80, "text": "هذا الدرس يشرح كيف نقرأ النص في سياقه الكامل."},
+        {"id": 2, "start": 90, "end": 170, "text": "السبب في تغيير المعنى هو حذف الجملة التي تسبق الفكرة."},
+        {"id": 3, "start": 220, "end": 320, "text": "لذلك يجب أن نقرأ الفقرة كاملة قبل أن نختار مقطعًا قصيرًا."},
+        {"id": 4, "start": 340, "end": 430, "text": "يسأل الطالب عن الفرق بين الفكرة والدليل."},
+        {"id": 5, "start": 540, "end": 630, "text": "الجواب يوضح أن الدليل لا ينفصل عن السؤال الذي جاء بعده."},
+        {"id": 6, "start": 650, "end": 710, "text": "في النهاية نلخص القاعدة بلغة بسيطة."}
+      ],
+      "gold_spans": [
+        {"start": 220, "end": 320, "topic": "context", "label": "read full paragraph"},
+        {"start": 540, "end": 630, "topic": "evidence", "label": "evidence and question"}
+      ],
+      "topic_labels": ["context", "evidence"],
+      "edge_cases": ["arabic_rtl", "topic_labels"],
+      "annotation_notes": ["Arabic text is authored for RTL evaluation only."]
+    },
+    {
+      "fixture_id": "fixture-mixed-arabic-english",
+      "content_type": "mixed",
+      "language": "ar-en",
+      "duration": 900,
+      "segments": [
+        {"id": 1, "start": 0, "end": 70, "text": "Welcome back. اليوم نستكشف how two languages share one discussion."},
+        {"id": 2, "start": 120, "end": 210, "text": "The key point is that translation changes emphasis even when the facts stay the same."},
+        {"id": 3, "start": 260, "end": 340, "text": "هذه الفكرة توضح أن الترجمة قد تختار كلمة أقوى من الأصل."},
+        {"id": 4, "start": 600, "end": 690, "text": "So the final recommendation is to keep the original wording beside any translation."},
+        {"id": 5, "start": 760, "end": 850, "text": "The last example returns to why context survives better with both versions."}
+      ],
+      "gold_spans": [
+        {"start": 120, "end": 210, "topic": "translation", "label": "emphasis change"},
+        {"start": 600, "end": 690, "topic": "recommendation", "label": "keep original wording"}
+      ],
+      "topic_labels": ["translation", "recommendation"],
+      "edge_cases": ["mixed_arabic_english", "arabic_rtl", "topic_labels"],
+      "annotation_notes": ["Language switches are intentional and synthetic."]
+    },
+    {
+      "fixture_id": "fixture-quiet-low-motion",
+      "content_type": "educational",
+      "language": "en",
+      "duration": 600,
+      "segments": [
+        {"id": 1, "start": 0, "end": 80, "text": "This lesson is deliberately quiet and visually still."},
+        {"id": 2, "start": 240, "end": 330, "text": "The important explanation is that silence can support careful reasoning."},
+        {"id": 3, "start": 420, "end": 510, "text": "This means a low energy moment can still be the most meaningful part."}
+      ],
+      "gold_spans": [
+        {"start": 240, "end": 330, "topic": "reasoning", "label": "silence and reasoning"},
+        {"start": 420, "end": 510, "topic": "energy_bias", "label": "low energy value"}
+      ],
+      "topic_labels": ["reasoning", "energy_bias"],
+      "edge_cases": ["quiet_low_motion", "topic_labels"],
+      "annotation_notes": ["Canned LLM response is empty to exercise deterministic fallback."],
+      "canned_response_mode": "empty"
+    },
+    {
+      "fixture_id": "fixture-late-moment",
+      "content_type": "podcast",
+      "language": "en",
+      "duration": 7200,
+      "segments": [
+        {"id": 1, "start": 0, "end": 60, "text": "We begin with a long conversation about ordinary travel details."},
+        {"id": 2, "start": 600, "end": 660, "text": "The host reviews a schedule and repeats several simple announcements."},
+        {"id": 3, "start": 1800, "end": 1860, "text": "A brief break mentions the weather and the next speaker."},
+        {"id": 4, "start": 3600, "end": 3660, "text": "The conversation returns to planning and ordinary examples."},
+        {"id": 5, "start": 5400, "end": 5460, "text": "The guest thanks the host and introduces the final thought."},
+        {"id": 6, "start": 7080, "end": 7160, "text": "The essential answer arrives here: preparation matters because it creates room for better questions."}
+      ],
+      "gold_spans": [
+        {"start": 7080, "end": 7160, "topic": "preparation", "label": "late essential answer"}
+      ],
+      "topic_labels": ["preparation"],
+      "edge_cases": ["late_moment", "topic_labels"],
+      "annotation_notes": ["The only meaningful moment is in the last two minutes of a two hour video."]
+    },
+    {
+      "fixture_id": "fixture-few-highlights",
+      "content_type": "educational",
+      "language": "en",
+      "duration": 480,
+      "segments": [
+        {"id": 1, "start": 0, "end": 70, "text": "The introduction prepares the problem but is not a standalone takeaway."},
+        {"id": 2, "start": 180, "end": 270, "text": "The single takeaway is that a stable routine reduces decision fatigue."},
+        {"id": 3, "start": 360, "end": 440, "text": "The conclusion restates the setup without adding a second idea."}
+      ],
+      "gold_spans": [
+        {"start": 180, "end": 270, "topic": "routine", "label": "single takeaway"}
+      ],
+      "topic_labels": ["routine"],
+      "edge_cases": ["few_highlights", "topic_labels"],
+      "annotation_notes": ["A fixed output count would over-produce highlights."]
+    },
+    {
+      "fixture_id": "fixture-many-highlights",
+      "content_type": "podcast",
+      "language": "en",
+      "duration": 1800,
+      "segments": [
+        {"id": 1, "start": 0, "end": 60, "text": "First idea: curiosity starts with a specific question."},
+        {"id": 2, "start": 120, "end": 180, "text": "Second idea: measurement changes what teams notice."},
+        {"id": 3, "start": 240, "end": 300, "text": "Third idea: feedback loops expose hidden assumptions."},
+        {"id": 4, "start": 360, "end": 420, "text": "Fourth idea: constraints can improve creativity."},
+        {"id": 5, "start": 480, "end": 540, "text": "Fifth idea: memory improves when facts have context."},
+        {"id": 6, "start": 600, "end": 660, "text": "Sixth idea: slows reviews prevent expensive mistakes."},
+        {"id": 7, "start": 720, "end": 780, "text": "Seventh idea: good questions outlive quick answers."},
+        {"id": 8, "start": 840, "end": 900, "text": "Eighth idea: trust grows when tradeoffs are explicit."},
+        {"id": 9, "start": 960, "end": 1020, "text": "Ninth idea: documentation preserves decisions."},
+        {"id": 10, "start": 1080, "end": 1140, "text": "Tenth idea: repetition reveals weak explanations."},
+        {"id": 11, "start": 1200, "end": 1260, "text": "Eleventh idea: teams learn from small reversals."},
+        {"id": 12, "start": 1320, "end": 1380, "text": "Twelfth idea: attention is a practical resource."},
+        {"id": 13, "start": 1440, "end": 1500, "text": "Thirteenth idea: examples beat abstract rules."},
+        {"id": 14, "start": 1560, "end": 1620, "text": "Fourteenth idea: reflection turns experience into judgment."}
+      ],
+      "gold_spans": [
+        {"start": 0, "end": 60, "topic": "curiosity", "label": "first idea"},
+        {"start": 120, "end": 180, "topic": "measurement", "label": "second idea"},
+        {"start": 240, "end": 300, "topic": "feedback", "label": "third idea"},
+        {"start": 360, "end": 420, "topic": "constraints", "label": "fourth idea"},
+        {"start": 480, "end": 540, "topic": "memory", "label": "fifth idea"},
+        {"start": 600, "end": 660, "topic": "reviews", "label": "sixth idea"},
+        {"start": 720, "end": 780, "topic": "questions", "label": "seventh idea"},
+        {"start": 840, "end": 900, "topic": "trust", "label": "eighth idea"},
+        {"start": 960, "end": 1020, "topic": "documentation", "label": "ninth idea"},
+        {"start": 1080, "end": 1140, "topic": "repetition", "label": "tenth idea"},
+        {"start": 1200, "end": 1260, "topic": "learning", "label": "eleventh idea"},
+        {"start": 1320, "end": 1380, "topic": "attention", "label": "twelfth idea"},
+        {"start": 1440, "end": 1500, "topic": "examples", "label": "thirteenth idea"},
+        {"start": 1560, "end": 1620, "topic": "reflection", "label": "fourteenth idea"}
+      ],
+      "topic_labels": ["curiosity", "measurement", "feedback", "constraints", "memory", "reviews", "questions", "trust", "documentation", "repetition", "learning", "attention", "examples", "reflection"],
+      "edge_cases": ["many_highlights", "topic_labels"],
+      "annotation_notes": ["Fourteen synthetic highlights exceed the default output limit of ten."]
+    },
+    {
+      "fixture_id": "fixture-adjacent-distinct",
+      "content_type": "educational",
+      "language": "en",
+      "duration": 600,
+      "segments": [
+        {"id": 1, "start": 0, "end": 80, "text": "This section introduces two nearby but separate ideas."},
+        {"id": 2, "start": 225, "end": 295, "text": "The first idea explains why measurement errors change the conclusion."},
+        {"id": 3, "start": 305, "end": 375, "text": "The second idea explains how to design a follow-up test with a different sample."},
+        {"id": 4, "start": 450, "end": 540, "text": "The ending says both ideas matter but should not be combined."}
+      ],
+      "gold_spans": [
+        {"start": 225, "end": 295, "topic": "measurement", "label": "error effect"},
+        {"start": 305, "end": 375, "topic": "follow_up", "label": "new sample test"}
+      ],
+      "topic_labels": ["measurement", "follow_up"],
+      "edge_cases": ["adjacent_distinct", "topic_labels"],
+      "annotation_notes": ["The two ideas are close in time but have different topics and should remain distinct."]
+    }
+  ]
+}

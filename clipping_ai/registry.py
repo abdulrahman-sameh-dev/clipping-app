@@ -14,7 +14,17 @@ from clipping_ai.errors import AIError, ErrorCategory
 
 logger = logging.getLogger(__name__)
 
-ProviderType = Literal["litellm", "groq_speech", "whisper_cpp"]
+ProviderType = Literal["litellm", "groq_speech", "whisper_cpp", "openai_compatible"]
+
+_DISCOVERED_OVERRIDE_FIELDS = (
+    "status",
+    "free_verified",
+    "verified_at",
+    "verification_source",
+    "api_available",
+    "verification_status",
+    "verification_message",
+)
 
 
 class ConfigError(AIError):
@@ -29,6 +39,8 @@ class ProviderConfig(BaseModel):
     enabled: bool = True
     api_key_env: str | None = None
     litellm_prefix: str | None = None
+    base_url: str | None = None
+    gateway: bool = False
     timeout_seconds: float | None = None
     max_retries: int | None = None
     min_interval_seconds: float = 0.0
@@ -51,12 +63,21 @@ class ModelEntry(BaseModel):
     id: str
     provider: str
     provider_model_id: str
+    display_name: str | None = None
     litellm_model: str | None = None
+    underlying_provider: str | None = None
+    underlying_model: str | None = None
     tasks: list[str] = Field(default_factory=list)
+    task_capabilities: list[str] = Field(default_factory=list)
     free: bool = False
     free_verified: bool = False
     verified_at: str | None = None
     verification_source: str | None = None
+    access_type: Literal["free_endpoint", "partner_endpoint", "downloadable", "unknown"] = "unknown"
+    pricing_status: Literal["free", "paid", "unknown"] = "unknown"
+    api_available: bool | Literal["unknown"] = "unknown"
+    verification_status: Literal["verified", "unverified", "failed", "unavailable"] = "unverified"
+    verification_message: str | None = None
     context_window: int | None = None
     max_output_tokens: int | None = None
     input_modalities: list[str] = Field(default_factory=lambda: ["text"])
@@ -65,6 +86,11 @@ class ModelEntry(BaseModel):
     supports_word_timestamps: bool = False
     daily_request_limit: int = 0
     status: Literal["enabled", "disabled"] = "disabled"
+    discovered: bool = False
+    catalog_source: str | None = None
+    catalog_resource_id: str | None = None
+    catalog_score: float = 0.0
+    catalog_updated_at: str | None = None
     notes: str | None = None
 
     def supports_task(self, task: str) -> bool:
@@ -79,6 +105,12 @@ class ModelEntry(BaseModel):
             raise ValueError("context_window must be positive")
         if self.daily_request_limit < 0:
             raise ValueError("daily_request_limit must be >= 0")
+        if not self.task_capabilities:
+            self.task_capabilities = list(self.tasks)
+        elif not self.tasks:
+            self.tasks = list(self.task_capabilities)
+        if self.free_verified and self.verification_status == "unverified":
+            self.verification_status = "verified"
         return self
 
 
@@ -94,7 +126,7 @@ class PolicyConfig(BaseModel):
     require_verified_free: bool = False
     allow_unverified_free_if_manually_approved: bool = True
     fallback_on_rate_limit: bool = True
-    fallback_on_quota_exhausted: bool = False
+    fallback_on_quota_exhausted: bool = True
     fallback_on_provider_unavailable: bool = True
     fallback_on_model_unavailable: bool = True
     fallback_on_timeout: bool = True
@@ -146,6 +178,7 @@ class Registry:
         providers: dict[str, ProviderConfig],
         models: dict[str, ModelEntry],
         local_models: dict[str, ModelEntry],
+        local_providers: dict[str, ProviderConfig] | None = None,
         routing: dict[str, list[RouteCandidate]],
         policy: PolicyConfig,
         retry: RetryConfig,
@@ -154,6 +187,10 @@ class Registry:
         self.providers = providers
         self.models = models
         self._local_models = local_models
+        self._local_providers = local_providers or {}
+        self._discovered_models = {
+            model_id: model for model_id, model in models.items() if model.discovered
+        }
         self.routing = routing
         self.policy = policy
         self.retry = retry
@@ -163,9 +200,10 @@ class Registry:
         config_dir = Path(config_dir)
         local_dir = config_dir / "local"
 
+        local_providers_raw = _read_json(local_dir / "providers.json")
         providers_raw = _deep_merge(
             _read_json(config_dir / "providers.json"),
-            _read_json(local_dir / "providers.json"),
+            local_providers_raw,
         )
         models_raw = _read_json(config_dir / "models.json")
         local_models_raw = _read_json(local_dir / "models.json")
@@ -183,26 +221,49 @@ class Registry:
                 pid: ProviderConfig.model_validate(cfg)
                 for pid, cfg in (providers_raw.get("providers") or {}).items()
             }
+            local_providers = {
+                pid: ProviderConfig.model_validate(cfg)
+                for pid, cfg in (local_providers_raw.get("providers") or {}).items()
+            }
         except ValidationError as exc:
             raise ConfigError(f"Invalid provider configuration: {exc}") from exc
 
         try:
-            models = {
+            from clipping_ai.providers.nvidia_catalog import cached_model_dicts
+
+            base_models = {
                 entry.id: entry
                 for entry in (
                     ModelEntry.model_validate(item) for item in (models_raw.get("models") or [])
                 )
             }
+            discovered_models = {
+                entry.id: entry
+                for entry in (
+                    ModelEntry.model_validate(item) for item in cached_model_dicts(config_dir)
+                )
+            }
             local_models = {
                 entry.id: entry
                 for entry in (
-                    ModelEntry.model_validate(item) for item in (local_models_raw.get("models") or [])
+                    ModelEntry.model_validate(item)
+                    for item in (local_models_raw.get("models") or [])
                 )
             }
         except ValidationError as exc:
             raise ConfigError(f"Invalid model registry: {exc}") from exc
 
-        models.update(local_models)
+        models = dict(base_models)
+        models.update(discovered_models)
+        for model_id, override in local_models.items():
+            if model_id in base_models:
+                models[model_id] = override
+            elif model_id in discovered_models:
+                discovered = discovered_models[model_id]
+                updates = {field: getattr(override, field) for field in _DISCOVERED_OVERRIDE_FIELDS}
+                models[model_id] = discovered.model_copy(update=updates)
+            elif override.catalog_source is None:
+                models[model_id] = override
 
         try:
             routing = {
@@ -230,6 +291,7 @@ class Registry:
             providers=providers,
             models=models,
             local_models=local_models,
+            local_providers=local_providers,
             routing=routing,
             policy=policy,
             retry=retry,
@@ -279,6 +341,10 @@ class Registry:
         verification_source: str | None,
         verified_at: str | None = None,
         free: bool | None = None,
+        api_available: bool | Literal["unknown"] | None = None,
+        verification_status: Literal["verified", "unverified", "failed", "unavailable"]
+        | None = None,
+        verification_message: str | None = None,
     ) -> ModelEntry:
         entry = self.require_model(model_id)
         if free is not None:
@@ -286,6 +352,12 @@ class Registry:
         entry.free_verified = free_verified
         entry.verification_source = verification_source
         entry.verified_at = verified_at or date.today().isoformat()
+        if api_available is not None:
+            entry.api_available = api_available
+        if verification_status is not None:
+            entry.verification_status = verification_status
+        if verification_message is not None:
+            entry.verification_message = verification_message
         self.models[model_id] = entry
         self._local_models[model_id] = entry
         self._persist_local_models()
@@ -298,6 +370,27 @@ class Registry:
         self._local_models[model_id] = entry
         self._persist_local_models()
         return entry
+
+    def set_provider_enabled(self, provider_id: str, enabled: bool) -> ProviderConfig:
+        provider = self.require_provider(provider_id)
+        provider = provider.model_copy(update={"enabled": enabled})
+        self.providers[provider_id] = provider
+        self._local_providers[provider_id] = provider
+        self._persist_local_providers()
+        return provider
+
+    def _persist_local_providers(self) -> None:
+        local_dir = self.config_dir / "local"
+        local_dir.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "providers": {
+                pid: provider.model_dump(mode="json")
+                for pid, provider in self._local_providers.items()
+            }
+        }
+        with (local_dir / "providers.json").open("w", encoding="utf-8") as fh:
+            json.dump(payload, fh, indent=2)
+            fh.write("\n")
 
     def _persist_local_models(self) -> None:
         local_dir = self.config_dir / "local"

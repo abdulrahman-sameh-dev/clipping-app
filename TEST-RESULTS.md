@@ -1,6 +1,6 @@
 # Acceptance Test Results
 
-**Date:** 2026-11-11  
+**Date:** 2026-11-14
 **Status:** PASS WITH LIMITATIONS  
 **Environment:** EndeavourOS, Python `3.14.8`, `uv 0.11.25`, FFmpeg `n9.0.2`, 8 vCPU,
 13 GiB RAM, approximately `55 GB` free disk.
@@ -9,7 +9,7 @@
 
 | Area | Result | Evidence |
 | --- | --- | --- |
-| Automated test suite | PASS | `215 passed, 3 skipped`; coverage `85%` |
+| Automated test suite | PASS | `259 passed, 3 skipped`; coverage baseline `84%` |
 | Static checks | PASS | `ruff check .` clean; `mypy clipping_ai` clean |
 | Build | PASS | Source distribution and wheel built |
 | Local ingestion | PASS | Arabic, English, educational samples reached `ready` |
@@ -36,16 +36,16 @@
 
 ```text
 uv run pytest -q
-215 passed, 3 skipped in 32.31s
+259 passed, 3 skipped in 32.51s
 
 uv run pytest --cov=clipping_ai --cov-report=term -q
-TOTAL 5984 statements, 921 missed, 85%
+TOTAL 7786 statements, 1220 missed, 84%
 
 uv run ruff check .
 All checks passed!
 
 uv run mypy clipping_ai
-Success: no issues found in 52 source files
+Success: no issues found in 65 source files
 
 uv build
 Successfully built dist/clipping_ai-0.1.0.tar.gz
@@ -53,6 +53,118 @@ Successfully built dist/clipping_ai-0.1.0-py3-none-any.whl
 ```
 
 The three skips are optional live-provider tests in `tests/test_live.py`.
+
+### NVIDIA catalog discovery verification
+
+NVIDIA catalog discovery was exercised live against the structured NGC search API
+and the public `/v1/models` endpoint. The run found 110 endpoint resources, 43 Free
+Endpoint resources, 18 text-capable resources, and 9 API-list matches. Models remain
+unverified until an operator supplies `NVIDIA_API_KEY` and completes a bounded smoke
+test. All policy, routing, cache, merge, and verification behavior is covered with
+mocked tests in `tests/test_nvidia_catalog.py`; no live inference request was made.
+
+### Short-form, metadata, and trash verification
+
+The post-acceptance phase adds `tests/test_metadata_trash.py` and frontend static
+integration checks. Verified results:
+
+```text
+uv run pytest -q tests/test_metadata_trash.py
+5 passed in 0.73s
+
+uv run pytest -q tests/test_frontend.py tests/test_metadata_trash.py
+12 passed in 1.05s
+
+uv run ruff check .
+All checks passed!
+
+uv run mypy clipping_ai
+Success: no issues found in 65 source files
+
+node --check clipping_ai/frontend/js/app.js
+node --check clipping_ai/frontend/js/api.js
+node --check clipping_ai/frontend/js/i18n.js
+node --check clipping_ai/frontend/js/polling.js
+
+npm run test:frontend
+6 passed
+
+PLAYWRIGHT_CHROMIUM_EXECUTABLE=... npm run test:e2e
+Studio UI smoke test passed.
+```
+
+Covered behavior: preferred 30-45s long-highlight splitting at transcript boundaries;
+metadata generation from clip-range context; manual-edit protection; forced
+regeneration; manual publishing timestamps; deleted-source guards; source/clip soft
+delete, restore, and permanent deletion with file-ownership checks; deleting a source
+without deleting clips; unified trash list/restore/empty; metadata/trash/delete API
+responses without internal paths; static integration of clip detail, metadata,
+publishing, selection, delete, and trash UI routes; scoped active-clip polling that
+pauses while hidden and stops when idle; and Node-level polling tests for overlap,
+cleanup/abort, visibility refresh, and failure backoff. The Playwright smoke test also
+verifies that an idle Clips page does not keep requesting `/api/clip-jobs?limit=200`.
+
+### Provider expansion, composition, and skills verification
+
+This phase adds `tests/test_skills_composition.py`, updates the real-config model
+count, and expands the Skills studio navigation. Verified results:
+
+```text
+uv run pytest -q
+259 passed, 3 skipped
+
+uv run ruff check clipping_ai tests
+All checks passed!
+
+uv run mypy clipping_ai
+Success: no issues found in 65 source files
+
+npm run test:frontend
+6 passed
+
+npm run test:e2e
+Studio UI smoke test passed.
+```
+
+Covered behavior: OpenAI-compatible gateway requests use the configured base URL,
+bearer key, and model; missing `base_url` blocks execution; provider enable toggles
+persist; external skill manifests stay disabled until review; unknown tools and
+undeclared permissions are rejected; skill tools time out with a bounded error;
+skills API list/toggle/execute work; visual enhancement can be disabled independently
+from captions; intensity scales/caps effects; Arabic callouts are written with an
+Arabic libass style. No real gateway quota was consumed.
+
+### Metadata reliability and source completion verification
+
+This phase adds `tests/test_metadata_reliability.py` and updates quota-policy tests.
+Verified results at that phase:
+
+```text
+uv run pytest -q
+232 passed, 3 skipped in 31.91s
+
+uv run ruff check clipping_ai tests
+All checks passed!
+
+uv run mypy clipping_ai
+Success: no issues found in 65 source files
+
+npm run test:frontend
+6 passed
+
+PLAYWRIGHT_CHROMIUM_EXECUTABLE=... npm run test:e2e
+Studio UI smoke test passed.
+```
+
+Covered behavior: one structured batch request maps metadata by clip ID; repeated
+runs are idempotent; omitted items receive local fallback; failed batches split until
+single clips succeed; quota failures produce local metadata without raising; clips
+without transcript context fail cleanly; manual edits survive unless force is
+explicit; free-quota exhaustion fails over to the next free model and skips the
+exhausted provider on later calls; policy can explicitly disable quota fallback; and
+source publishing completion stores/clears timestamps, reports total/published counts,
+resets when clips are created, and survives trash/restore. Real provider quota was
+not consumed.
 
 ## Real media results
 
@@ -248,12 +360,19 @@ graceful shutdown. The recovery path is verified for the harsher SIGKILL case.
   model cannot reliably inspect generated images; contact sheets are available for a
   human reviewer.
 - Arabic OCR: tesseract lacks Arabic traineddata.
+- Live NVIDIA inference: no `NVIDIA_API_KEY` was available. Catalog and public model
+  list discovery ran live; inference verification remains mocked. FreeLLMAPI was
+  removed from the bundled configuration.
+- Subjective visual review of the new intensity/category controls and one-callout
+  composition; automated ASS and plan assertions passed.
 - Local Whisper.cpp in this run: provider is disabled and no binary/model is
   installed. Historical manual verification is documented in `TESTING.md`.
 - Real podcast/interview media: no suitable local sample was available.
 - Real gaming media with and without commentary: no suitable local sample was
   available.
 - Category A/C/D end-to-end accuracy claims must not be made from this run.
+- Subjective interaction review of the new clip detail, metadata, publishing, and
+  Trash screens at desktop/mobile widths was not performed in this automated run.
 
 ## Artifacts
 

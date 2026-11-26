@@ -1,0 +1,12 @@
+{
+  "id": "educational-explainer",
+  "name": "Educational Visual Explanation",
+  "version": "1.0.0",
+  "category": "analysis",
+  "description": "Plans conservative explanatory emphasis for educational clips using metadata that already exists locally.",
+  "instructions": "Prefer clarity over spectacle. Do not fabricate facts, sources or diagrams. If no reliable structure exists, return no visual additions.",
+  "tools": ["analysis.explainer_plan"],
+  "permissions": {"network": false, "filesystem": false, "subprocess": false},
+  "timeout_seconds": 20,
+  "enabled_by_default": false
+}

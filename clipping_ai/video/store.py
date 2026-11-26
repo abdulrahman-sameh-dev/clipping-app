@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 import json
 import sqlite3
 import threading
@@ -13,6 +14,8 @@ from typing import Any
 
 from clipping_ai.errors import AIError, ErrorCategory
 from clipping_ai.highlights.models import HighlightResult
+from clipping_ai.recovery.idempotency import release_idempotency, reserve_idempotency
+from clipping_ai.recovery.schema import migrate_jobs_db
 from clipping_ai.schemas import TranscriptResult
 from clipping_ai.video.ingest import is_safe_job_id
 from clipping_ai.video.models import (
@@ -47,6 +50,9 @@ CREATE TABLE IF NOT EXISTS video_jobs (
     stage TEXT NOT NULL,
     progress REAL NOT NULL DEFAULT 0,
     error_json TEXT,
+    all_clips_published INTEGER NOT NULL DEFAULT 0,
+    all_clips_published_at TEXT,
+    deleted_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     started_at TEXT,
@@ -69,6 +75,9 @@ _ADDED_COLUMNS = {
     "highlight_json": "TEXT",
     "highlight_error": "TEXT",
     "highlight_at": "TEXT",
+    "all_clips_published": "INTEGER NOT NULL DEFAULT 0",
+    "all_clips_published_at": "TEXT",
+    "deleted_at": "TEXT",
 }
 
 _UPDATE_COLUMNS = {
@@ -91,6 +100,9 @@ _UPDATE_COLUMNS = {
     "stage",
     "progress",
     "error",
+    "all_clips_published",
+    "all_clips_published_at",
+    "deleted_at",
     "started_at",
     "completed_at",
 }
@@ -120,6 +132,7 @@ class VideoJobStore:
         with self._session() as conn:
             conn.executescript(_SCHEMA)
             self._migrate(conn)
+        migrate_jobs_db(self.db_path)
 
     @staticmethod
     def _migrate(conn: sqlite3.Connection) -> None:
@@ -211,6 +224,9 @@ class VideoJobStore:
             stage=JobStage(row["stage"]),
             progress=float(row["progress"]),
             error=error,
+            all_clips_published=bool(row["all_clips_published"]),
+            all_clips_published_at=row["all_clips_published_at"],
+            deleted_at=row["deleted_at"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             started_at=row["started_at"],
@@ -253,6 +269,120 @@ class VideoJobStore:
                 ),
             )
         return self.require(job_id)
+
+    def create_idempotent(
+        self,
+        *,
+        job_id: str,
+        idempotency_key: str,
+        source_type: SourceType,
+        source_value: str,
+        original_filename: str | None = None,
+        source_hash: str | None = None,
+        input_path: Path | None = None,
+        dedupe_hash: bool = False,
+        dedupe_source: bool = False,
+    ) -> tuple[VideoJob, bool]:
+        """Create a video job once for a stable request fingerprint.
+
+        The idempotency reservation and the job row are committed in one
+        ``BEGIN IMMEDIATE`` transaction.  A concurrent duplicate receives the
+        already-created job instead of a second row.
+        """
+        self._validate_id(job_id)
+        now = _now()
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                existing_id = reserve_idempotency(
+                    conn,
+                    scope="video.create",
+                    key=idempotency_key,
+                    job_type="video",
+                    job_id=job_id,
+                )
+                if existing_id is not None:
+                    row = conn.execute(
+                        "SELECT * FROM video_jobs WHERE id = ?", (existing_id,)
+                    ).fetchone()
+                    conn.commit()
+                    if row is None:
+                        raise AIError(
+                            ErrorCategory.NOT_FOUND,
+                            f"Video job '{existing_id}' was not found.",
+                            retryable=False,
+                        )
+                    return self._row_to_job(row), True
+
+                duplicate = None
+                if dedupe_hash and source_hash:
+                    duplicate = conn.execute(
+                        """
+                        SELECT * FROM video_jobs
+                        WHERE source_hash = ? AND deleted_at IS NULL
+                          AND status IN (?, ?, ?)
+                        ORDER BY created_at ASC LIMIT 1
+                        """,
+                        (
+                            source_hash,
+                            JobStatus.QUEUED.value,
+                            JobStatus.PROCESSING.value,
+                            JobStatus.READY.value,
+                        ),
+                    ).fetchone()
+                elif dedupe_source:
+                    duplicate = conn.execute(
+                        """
+                        SELECT * FROM video_jobs
+                        WHERE source_type = ? AND source_value = ?
+                          AND deleted_at IS NULL AND status IN (?, ?, ?)
+                        ORDER BY created_at ASC LIMIT 1
+                        """,
+                        (
+                            source_type.value,
+                            source_value,
+                            JobStatus.QUEUED.value,
+                            JobStatus.PROCESSING.value,
+                            JobStatus.READY.value,
+                        ),
+                    ).fetchone()
+                if duplicate is not None:
+                    release_idempotency(
+                        conn, scope="video.create", key=idempotency_key
+                    )
+                    conn.commit()
+                    return self._row_to_job(duplicate), True
+
+                conn.execute(
+                    """
+                    INSERT INTO video_jobs (
+                        id, source_type, source_value, original_filename, source_hash,
+                        input_path, metadata_json, audio_path, audio_chunks_json,
+                        status, stage, progress, error_json, created_at, updated_at,
+                        started_at, completed_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, '[]', ?, ?, 0, NULL, ?, ?, NULL, NULL)
+                    """,
+                    (
+                        job_id,
+                        source_type.value,
+                        source_value,
+                        original_filename,
+                        source_hash,
+                        str(input_path) if input_path else None,
+                        JobStatus.QUEUED.value,
+                        JobStage.QUEUED.value,
+                        now,
+                        now,
+                    ),
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+        return self.require(job_id), False
 
     def get(self, job_id: str) -> VideoJob | None:
         self._validate_id(job_id)
@@ -320,7 +450,7 @@ class VideoJobStore:
                 row = conn.execute(
                     """
                     SELECT id FROM video_jobs
-                    WHERE status = ?
+                    WHERE status = ? AND deleted_at IS NULL
                     ORDER BY created_at ASC
                     LIMIT 1
                     """,
@@ -434,7 +564,7 @@ class VideoJobStore:
                 UPDATE video_jobs
                 SET status = ?, stage = ?, progress = 0, error_json = NULL,
                     started_at = NULL, completed_at = NULL, updated_at = ?
-                WHERE status = ?
+                WHERE status = ? AND deleted_at IS NULL
                 """,
                 (
                     JobStatus.QUEUED.value,
@@ -461,7 +591,8 @@ class VideoJobStore:
             row = conn.execute(
                 f"""
                 SELECT * FROM video_jobs
-                WHERE source_hash = ? AND status IN ({placeholders})
+                WHERE source_hash = ? AND deleted_at IS NULL
+                  AND status IN ({placeholders})
                 ORDER BY created_at ASC
                 LIMIT 1
                 """,
@@ -486,7 +617,8 @@ class VideoJobStore:
             row = conn.execute(
                 f"""
                 SELECT * FROM video_jobs
-                WHERE source_type = ? AND source_value = ? AND status IN ({placeholders})
+                WHERE source_type = ? AND source_value = ? AND deleted_at IS NULL
+                  AND status IN ({placeholders})
                 ORDER BY created_at ASC
                 LIMIT 1
                 """,
@@ -499,24 +631,35 @@ class VideoJobStore:
         *,
         limit: int = 50,
         status: JobStatus | None = None,
+        deleted: bool = False,
     ) -> list[VideoJob]:
         limit = max(1, min(limit, 500))
-        if status is None:
-            with self._session() as conn:
-                rows = conn.execute(
-                    "SELECT * FROM video_jobs ORDER BY created_at DESC LIMIT ?",
-                    (limit,),
-                ).fetchall()
-        else:
-            with self._session() as conn:
-                rows = conn.execute(
-                    "SELECT * FROM video_jobs WHERE status = ? "
-                    "ORDER BY created_at DESC LIMIT ?",
-                    (status.value, limit),
-                ).fetchall()
+        clauses = ["deleted_at IS NOT NULL" if deleted else "deleted_at IS NULL"]
+        values: list[Any] = []
+        if status is not None:
+            clauses.append("status = ?")
+            values.append(status.value)
+        values.append(limit)
+        with self._session() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM video_jobs WHERE {' AND '.join(clauses)} "
+                "ORDER BY created_at DESC LIMIT ?",
+                values,
+            ).fetchall()
         return [self._row_to_job(row) for row in rows]
 
-    def count(self) -> int:
+    def list_deleted(self, *, limit: int = 500) -> builtins.list[VideoJob]:
+        return self.list(limit=limit, deleted=True)
+
+    def delete_row(self, job_id: str) -> None:
+        self._validate_id(job_id)
         with self._session() as conn:
-            row = conn.execute("SELECT COUNT(*) AS n FROM video_jobs").fetchone()
+            conn.execute("DELETE FROM video_jobs WHERE id = ?", (job_id,))
+
+    def count(self, *, deleted: bool = False) -> int:
+        clause = "deleted_at IS NOT NULL" if deleted else "deleted_at IS NULL"
+        with self._session() as conn:
+            row = conn.execute(
+                f"SELECT COUNT(*) AS n FROM video_jobs WHERE {clause}"
+            ).fetchone()
         return int(row["n"]) if row else 0

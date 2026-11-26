@@ -2,43 +2,112 @@
   "$comment": "Task routing. Each task lists candidates in priority order. Candidates are filtered by free-only policy, provider availability, task capability and JSON support. Edit this file to change providers/models without touching application code.",
   "tasks": {
     "speech_to_text": [
-      { "provider": "groq_speech", "model": "groq-whisper-turbo" },
-      { "provider": "whisper_cpp", "model": "local-whisper" }
+      {
+        "provider": "groq_speech",
+        "model": "groq-whisper-turbo"
+      },
+      {
+        "provider": "whisper_cpp",
+        "model": "local-whisper"
+      }
     ],
     "content_analysis": [
-      { "provider": "gemini", "model": "gemini-3.8-flash" },
-      { "provider": "openrouter", "model": "openrouter-free-router" },
-      { "provider": "groq", "model": "groq-gpt-oss-120b" }
+      {
+        "provider": "gemini",
+        "model": "gemini-3.8-flash"
+      },
+      {
+        "provider": "openrouter",
+        "model": "openrouter-free-router"
+      },
+      {
+        "provider": "groq",
+        "model": "groq-gpt-oss-120b"
+      }
     ],
     "highlight_detection": [
-      { "provider": "gemini", "model": "gemini-3.8-flash" },
-      { "provider": "openrouter", "model": "openrouter-free-router" },
-      { "provider": "groq", "model": "groq-gpt-oss-120b" }
+      {
+        "provider": "gemini",
+        "model": "gemini-3.8-flash"
+      },
+      {
+        "provider": "openrouter",
+        "model": "openrouter-free-router"
+      },
+      {
+        "provider": "groq",
+        "model": "groq-gpt-oss-120b"
+      }
     ],
     "clip_scoring": [
-      { "provider": "gemini", "model": "gemini-3.8-flash" },
-      { "provider": "openrouter", "model": "openrouter-free-router" },
-      { "provider": "groq", "model": "groq-gpt-oss-120b" }
+      {
+        "provider": "gemini",
+        "model": "gemini-3.8-flash"
+      },
+      {
+        "provider": "openrouter",
+        "model": "openrouter-free-router"
+      },
+      {
+        "provider": "groq",
+        "model": "groq-gpt-oss-120b"
+      }
     ],
     "title_generation": [
-      { "provider": "gemini", "model": "gemini-3.8-flash" },
-      { "provider": "openrouter", "model": "openrouter-free-router" },
-      { "provider": "groq", "model": "groq-gpt-oss-120b" }
+      {
+        "provider": "gemini",
+        "model": "gemini-3.8-flash"
+      },
+      {
+        "provider": "openrouter",
+        "model": "openrouter-free-router"
+      },
+      {
+        "provider": "groq",
+        "model": "groq-gpt-oss-120b"
+      }
     ],
     "description_generation": [
-      { "provider": "gemini", "model": "gemini-3.8-flash" },
-      { "provider": "openrouter", "model": "openrouter-free-router" },
-      { "provider": "groq", "model": "groq-gpt-oss-120b" }
+      {
+        "provider": "gemini",
+        "model": "gemini-3.8-flash"
+      },
+      {
+        "provider": "openrouter",
+        "model": "openrouter-free-router"
+      },
+      {
+        "provider": "groq",
+        "model": "groq-gpt-oss-120b"
+      }
     ],
     "translation": [
-      { "provider": "gemini", "model": "gemini-3.8-flash" },
-      { "provider": "openrouter", "model": "openrouter-free-router" },
-      { "provider": "groq", "model": "groq-gpt-oss-120b" }
+      {
+        "provider": "gemini",
+        "model": "gemini-3.8-flash"
+      },
+      {
+        "provider": "openrouter",
+        "model": "openrouter-free-router"
+      },
+      {
+        "provider": "groq",
+        "model": "groq-gpt-oss-120b"
+      }
     ],
     "caption_refinement": [
-      { "provider": "gemini", "model": "gemini-3.8-flash" },
-      { "provider": "groq", "model": "groq-gpt-oss-120b" },
-      { "provider": "openrouter", "model": "openrouter-free-router" }
+      {
+        "provider": "gemini",
+        "model": "gemini-3.8-flash"
+      },
+      {
+        "provider": "groq",
+        "model": "groq-gpt-oss-120b"
+      },
+      {
+        "provider": "openrouter",
+        "model": "openrouter-free-router"
+      }
     ]
   }
 }

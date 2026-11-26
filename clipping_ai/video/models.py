@@ -110,6 +110,9 @@ class VideoJob(BaseModel):
     stage: JobStage = JobStage.QUEUED
     progress: float = Field(default=0.0, ge=0.0, le=1.0)
     error: dict[str, Any] | None = None
+    all_clips_published: bool = False
+    all_clips_published_at: str | None = None
+    deleted_at: str | None = None
     created_at: str
     updated_at: str
     started_at: str | None = None
@@ -117,6 +120,15 @@ class VideoJob(BaseModel):
 
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump(mode="json")
+
+    def public_dict(self) -> dict[str, Any]:
+        return self.model_dump(
+            mode="json",
+            exclude={"input_path", "audio_path", "audio_chunks", "source_hash"},
+        )
+
+    def display_title(self) -> str:
+        return self.original_filename or self.source_value or f"Source {self.id[:8]}"
 
     def status_dict(self) -> dict[str, Any]:
         return {

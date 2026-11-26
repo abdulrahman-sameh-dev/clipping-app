@@ -133,7 +133,36 @@ def test_fallback_never_uses_paid_candidate(tmp_path):
     assert paid.calls == []
 
 
-def test_quota_exhaustion_never_falls_back(tmp_path):
+def test_quota_falls_back_to_next_free_model_and_cools_down_provider(tmp_path):
+    first = FakeTextProvider("p1", [quota_error("p1", "free-1")])
+    second = FakeTextProvider("p2", [VALID, VALID])
+    manager = build(
+        tmp_path,
+        models=[
+            text_model("free-1", provider="p1"),
+            text_model("free-2", provider="p2"),
+        ],
+        routing={
+            "content_analysis": [
+                RouteCandidate(provider="p1", model="free-1"),
+                RouteCandidate(provider="p2", model="free-2"),
+            ]
+        },
+        providers={"p1": first, "p2": second},
+    )
+    result = manager.analyze("content_analysis", text="hello")
+    assert result["used_fallback"] is True
+    assert result["model"] == "free-2"
+    assert len(first.calls) == 1
+    assert len(second.calls) == 1
+
+    second_result = manager.analyze("content_analysis", text="again")
+    assert second_result["model"] == "free-2"
+    assert len(first.calls) == 1
+    assert len(second.calls) == 2
+
+
+def test_quota_fallback_can_be_disabled_by_policy(tmp_path):
     first = FakeTextProvider("p1", [quota_error("p1", "free-1")])
     second = FakeTextProvider("p2", [VALID])
     manager = build(
@@ -149,6 +178,10 @@ def test_quota_exhaustion_never_falls_back(tmp_path):
             ]
         },
         providers={"p1": first, "p2": second},
+        policy=PolicyConfig(
+            schema_validation_retries=0,
+            fallback_on_quota_exhausted=False,
+        ),
     )
     with pytest.raises(AIError) as exc:
         manager.analyze("content_analysis", text="hello")

@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test:e2e": "node tests/e2e/studio-smoke.mjs"
+    "test:frontend": "node --test tests/frontend/*.test.mjs",
+    "test:e2e": "node tests/e2e/studio-smoke.mjs && node tests/e2e/trim-editor.mjs"
   },
   "devDependencies": {
     "playwright": "1.65.0"

@@ -27,7 +27,9 @@ class FreeOnlyPolicy:
 
     def evaluate(self, entry: ModelEntry, task: str) -> Eligibility:
         if not entry.is_enabled():
-            return Eligibility(False, "model is disabled in the registry", ErrorCategory.POLICY_VIOLATION)
+            return Eligibility(
+                False, "model is disabled in the registry", ErrorCategory.POLICY_VIOLATION
+            )
         if not entry.free:
             return Eligibility(
                 False,
@@ -40,16 +42,22 @@ class FreeOnlyPolicy:
                 f"model does not support task '{task}'",
                 ErrorCategory.UNSUPPORTED_CAPABILITY,
             )
+        if entry.api_available is False or entry.verification_status in (
+            "failed",
+            "unavailable",
+        ):
+            return Eligibility(
+                False,
+                entry.verification_message or "model endpoint is not available",
+                ErrorCategory.MODEL_UNAVAILABLE,
+            )
         if self.config.require_verified_free and not entry.free_verified:
             return Eligibility(
                 False,
                 "model free eligibility is not verified and require_verified_free=true",
                 ErrorCategory.POLICY_VIOLATION,
             )
-        if (
-            not entry.free_verified
-            and not self.config.allow_unverified_free_if_manually_approved
-        ):
+        if not entry.free_verified and not self.config.allow_unverified_free_if_manually_approved:
             return Eligibility(
                 False,
                 "unverified free models are not allowed by policy",

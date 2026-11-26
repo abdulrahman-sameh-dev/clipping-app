@@ -163,8 +163,21 @@ def _segments_between(
 
 
 def _duration_score(duration: float, config: HighlightSettings) -> float:
-    target = (config.min_clip_seconds + config.max_clip_seconds) / 2
-    spread = max(1.0, (config.max_clip_seconds - config.min_clip_seconds) / 2)
+    if (
+        config.target_clip_seconds_min is not None
+        and config.target_clip_seconds_max is not None
+    ):
+        target = (
+            config.target_clip_seconds_min + config.target_clip_seconds_max
+        ) / 2
+        spread = max(
+            1.0,
+            (config.target_clip_seconds_max - config.target_clip_seconds_min) / 2
+            + config.target_duration_tolerance_seconds,
+        )
+    else:
+        target = (config.min_clip_seconds + config.max_clip_seconds) / 2
+        spread = max(1.0, (config.max_clip_seconds - config.min_clip_seconds) / 2)
     return _clamp(1.0 - abs(duration - target) / spread)
 
 

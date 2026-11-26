@@ -16,6 +16,7 @@ from clipping_ai.clips.service import ClipService
 from clipping_ai.errors import AIError
 from clipping_ai.highlights.models import ContentType
 from clipping_ai.manager import ProviderManager
+from clipping_ai.recovery import DataDirectoryLock, DataDirectoryLockedError
 from clipping_ai.schemas import ALL_TASKS, TEXT_TASKS
 from clipping_ai.settings import get_settings
 from clipping_ai.video.models import JobStatus, VideoJob
@@ -158,6 +159,10 @@ def build_parser() -> argparse.ArgumentParser:
     highlights.add_argument("--model")
     highlights.add_argument("--no-llm", action="store_true")
     highlights.add_argument("--refresh", action="store_true")
+    highlights.add_argument("--multi-pass", action="store_true")
+    highlights.add_argument("--window-seconds", type=float)
+    highlights.add_argument("--overlap-seconds", type=float)
+    highlights.add_argument("--max-highlights", type=int)
     highlights.add_argument("--json", action="store_true")
 
     analyze_job = sub.add_parser(
@@ -174,6 +179,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     analyze_job.add_argument("--no-llm", action="store_true")
     analyze_job.add_argument("--refresh", action="store_true")
+    analyze_job.add_argument("--multi-pass", action="store_true")
+    analyze_job.add_argument("--window-seconds", type=float)
+    analyze_job.add_argument("--overlap-seconds", type=float)
+    analyze_job.add_argument("--max-highlights", type=int)
     analyze_job.add_argument("--json", action="store_true")
 
     analysis_config = sub.add_parser(
@@ -267,7 +276,7 @@ def _analysis_service(*, with_manager: bool) -> AnalysisService:
 
 
 def _clip_service() -> ClipService:
-    return ClipService(get_settings())
+    return ClipService(get_settings(), manager=_manager())
 
 
 def _print_status(data: dict[str, Any]) -> None:
@@ -416,7 +425,32 @@ def _print_usage(data: dict[str, Any]) -> None:
         )
 
 
+_MUTATING_COMMANDS = {
+    "prepare",
+    "retry",
+    "cancel",
+    "render-clips",
+    "render-clip",
+    "retry-clip",
+    "cancel-clip",
+    "transcribe-job",
+    "highlights",
+    "analyze-job",
+    "analyze",
+    "transcribe",
+    "test-connection",
+    "verify-free",
+}
+
+
 def run(args: argparse.Namespace) -> int:
+    if args.command in _MUTATING_COMMANDS:
+        with DataDirectoryLock(get_settings().data_dir):
+            return _run(args)
+    return _run(args)
+
+
+def _run(args: argparse.Namespace) -> int:
     settings = get_settings()
 
     if args.command == "serve":
@@ -597,6 +631,10 @@ def run(args: argparse.Namespace) -> int:
                 model=args.model,
                 use_llm=False if args.no_llm else None,
                 refresh=args.refresh,
+                multi_pass=True if args.multi_pass else None,
+                window_seconds=args.window_seconds,
+                overlap_seconds=args.overlap_seconds,
+                max_highlights=args.max_highlights,
             )
         else:
             job = analysis_service.analyze(
@@ -607,6 +645,10 @@ def run(args: argparse.Namespace) -> int:
                 content_type=ContentType(args.content_type),
                 use_llm=False if args.no_llm else None,
                 refresh=args.refresh,
+                multi_pass=True if args.multi_pass else None,
+                window_seconds=args.window_seconds,
+                overlap_seconds=args.overlap_seconds,
+                max_highlights=args.max_highlights,
             )
         if args.json:
             _dump(job.to_dict())
@@ -710,6 +752,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {exc.message}", file=sys.stderr)
         if exc.details:
             print(json.dumps(exc.to_dict(), indent=2, default=str), file=sys.stderr)
+        return 1
+    except DataDirectoryLockedError as exc:
+        print(f"error: {exc}", file=sys.stderr)
         return 1
     except (OSError, json.JSONDecodeError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)

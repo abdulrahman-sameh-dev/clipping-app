@@ -42,6 +42,7 @@ def test_studio_assets_are_served(tmp_path):
         ("/ui/js/app.js", "text/javascript"),
         ("/ui/js/api.js", "text/javascript"),
         ("/ui/js/i18n.js", "text/javascript"),
+        ("/ui/js/polling.js", "text/javascript"),
         ("/ui/js/ui.js", "text/javascript"),
     ]:
         response = client.get(path)
@@ -62,6 +63,74 @@ def test_frontend_files_are_present():
         "js/app.js",
         "js/api.js",
         "js/i18n.js",
+        "js/polling.js",
         "js/ui.js",
     ]:
         assert (FRONTEND_DIR / path).is_file(), path
+
+
+def test_frontend_includes_clip_detail_trash_metadata_and_delete_flows():
+    index = (FRONTEND_DIR / "index.html").read_text()
+    app = (FRONTEND_DIR / "js" / "app.js").read_text()
+    api = (FRONTEND_DIR / "js" / "api.js").read_text()
+    i18n = (FRONTEND_DIR / "js" / "i18n.js").read_text()
+
+    assert 'href="#/trash"' in index
+    assert 'id="i-trash"' in index
+    assert 'case "trash":' in app
+    assert "function clipDetailView" in app
+    assert "function trashView" in app
+    assert 'route.name === "clip"' in app
+    assert "payload.hashtags.split" in app
+    assert "data-action=\"delete-clip\"" in app
+    assert "data-select-trash" in app
+
+    for endpoint in [
+        "/metadata",
+        "/metadata/regenerate",
+        "/publish",
+        "/restore",
+        "/permanent",
+        "/api/trash",
+    ]:
+        assert endpoint in api
+    assert "updateClipMetadata" in api
+    assert "regenerateClipMetadata" in api
+    assert "setClipPublished" in api
+    assert "listTrash" in api
+    assert "restoreTrash" in api
+    assert "purgeTrash" in api
+    assert "emptyTrash" in api
+
+    for key in [
+        "nav.trash",
+        "clips.metadata",
+        "clips.regenerate",
+        "clips.markPublished",
+        "trash.title",
+        "trash.restore",
+        "trash.deleteForever",
+        "trash.empty",
+    ]:
+        assert key in i18n
+
+
+def test_frontend_api_exposes_source_media_url():
+    api = (FRONTEND_DIR / "js" / "api.js").read_text()
+
+    assert "sourceMediaUrl" in api
+    assert "/api/video/jobs/${encodeURIComponent(id)}/media" in api
+
+
+def test_frontend_uses_scoped_visibility_aware_polling():
+    app = (FRONTEND_DIR / "js" / "app.js").read_text()
+    polling = (FRONTEND_DIR / "js" / "polling.js").read_text()
+    api = (FRONTEND_DIR / "js" / "api.js").read_text()
+
+    assert "createPoller" in app
+    assert "visibilitychange" in polling
+    assert "controller?.abort()" in polling
+    assert "isActive: () => clips.some(isClipActive)" in app
+    assert 'ids: activeIds.join(",")' in app
+    assert "sameJson(nextClips, clips)" in app
+    assert "listClipJobs: (params = {}, options = {})" in api

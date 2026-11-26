@@ -33,6 +33,9 @@ class HighlightSettings(BaseModel):
     enabled: bool = True
     min_clip_seconds: float = Field(default=12.0, gt=0)
     max_clip_seconds: float = Field(default=180.0, gt=0)
+    target_clip_seconds_min: float | None = Field(default=None, gt=0)
+    target_clip_seconds_max: float | None = Field(default=None, gt=0)
+    target_duration_tolerance_seconds: float = Field(default=15.0, ge=0)
     max_highlights: int = Field(default=10, ge=1, le=50)
     candidate_window_seconds: float = Field(default=60.0, gt=0)
     candidate_stride_seconds: float = Field(default=30.0, gt=0)
@@ -81,10 +84,38 @@ class HighlightSettings(BaseModel):
     def _sane_ranges(self) -> HighlightSettings:
         if self.min_clip_seconds > self.max_clip_seconds:
             raise ValueError("min_clip_seconds must be <= max_clip_seconds")
+        if (self.target_clip_seconds_min is None) != (
+            self.target_clip_seconds_max is None
+        ):
+            raise ValueError(
+                "target_clip_seconds_min and target_clip_seconds_max must be set together"
+            )
+        if (
+            self.target_clip_seconds_min is not None
+            and self.target_clip_seconds_max is not None
+            and self.target_clip_seconds_min > self.target_clip_seconds_max
+        ):
+            raise ValueError(
+                "target_clip_seconds_min must be <= target_clip_seconds_max"
+            )
         if self.candidate_stride_seconds > self.candidate_window_seconds:
             raise ValueError("candidate_stride_seconds must be <= candidate_window_seconds")
         if self.semantic_merge_gap_seconds > self.semantic_bridge_gap_seconds:
             raise ValueError("semantic_merge_gap_seconds must be <= semantic_bridge_gap_seconds")
+        return self
+
+
+class MultiPassSettings(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    enabled: bool = False
+    window_seconds: float = Field(default=600.0, gt=0)
+    overlap_seconds: float = Field(default=0.0, ge=0)
+
+    @model_validator(mode="after")
+    def _sane_window(self) -> MultiPassSettings:
+        if self.overlap_seconds >= self.window_seconds:
+            raise ValueError("overlap_seconds must be smaller than window_seconds")
         return self
 
 
@@ -93,6 +124,7 @@ class AnalysisConfig(BaseModel):
 
     transcription: TranscriptionSettings = Field(default_factory=TranscriptionSettings)
     highlights: HighlightSettings = Field(default_factory=HighlightSettings)
+    multi_pass: MultiPassSettings = Field(default_factory=MultiPassSettings)
 
 
 def _read_json(path: Path) -> dict[str, Any]:

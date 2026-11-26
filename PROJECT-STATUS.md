@@ -28,6 +28,27 @@
   mixed RTL-safe ASS rendering, safe-area placement, restrained automatic zoom/
   punch/emphasis/boundary fades, and automatic blurred vertical fit for landscape
   sources. Explicit caller fit still wins.
+- Short-form, metadata, and trash phase complete: highlights prefer a soft 30-45s
+  target and split only at transcript boundaries; clips generate editable publishing
+  metadata through bounded `title_generation` batches; the studio has clip detail,
+  clip/source publishing status, selection/bulk actions, and unified Trash; source and
+  clip deletion are soft by default with guarded permanent deletion.
+- Metadata reliability and source completion complete: free-quota errors fail over
+  across free providers with provider cooldown, batch failures split and fall back to
+  deterministic local metadata, pending batches resume on restart, and source-level
+  `All clips published` persists with counts and completed/incomplete filters.
+- Provider, composition, and skills extension complete: an optional
+  OpenAI-compatible adapter supports verified free gateways. NVIDIA NIM free
+  endpoints are discovered from structured catalog metadata, task-filtered, checked
+  against the public model list, and verified with bounded smoke tests before being
+  marked Ready. Provider enable toggles persist locally, and provider status exposes
+  gateway, catalog, cooldown, and last success/failure details.
+- Content-aware visual composition complete: per-clip settings persist, intensity
+  scales and caps effects, category toggles control zoom/punch/emphasis/transitions,
+  and at most one top-safe callout is written as ASS for libass shaping.
+- Skills/Tools infrastructure complete: data-only manifests, registered tools only,
+  explicit external review, permission/timeout enforcement, API routes, and a studio
+  Skills view with enable/disable controls.
 - Local end-to-end acceptance testing complete against real Arabic and English media.
   See `ACCEPTANCE-TESTING.md` for the repeatable procedure and `TEST-RESULTS.md` for
   evidence.
@@ -36,7 +57,15 @@
 
 ## Verification
 
-- `uv run pytest -q`: `215 passed, 3 skipped`; coverage `85%`.
+- `uv run pytest -q`: `259 passed, 3 skipped`; coverage baseline `84%` from the last
+  coverage run. New coverage includes the extension suite: gateway HTTP/auth and
+  availability, provider toggle persistence, skill review/enable/permission/timeout
+  behavior, skills API routes, visual settings scaling/capping, callout generation,
+  Arabic ASS overlays, NVIDIA catalog classification/cache/merge/routing/policy and
+  bounded smoke verification, plus the prior metadata, failover, publishing, trash,
+  API, duration-splitting, and scoped polling coverage.
+- `npm run test:frontend`: 6 Node polling tests pass; `npm run test:e2e` passes with
+  the seven-link navigation and verifies an idle Clips page stops polling clip jobs.
 - Real local FFmpeg tests render all three formats and probe video/audio streams.
 - Arabic captions are tested for preserved RTL text and `Noto Sans Arabic`.
 - Dynamic caption tests cover word-timestamp sync, current-word accenting, mixed
@@ -85,7 +114,8 @@
   the full deterministic run returns three complete moments instead of five short
   fragments.
 - `uv run ruff check .`: clean.
-- `uv run mypy clipping_ai`: clean.
+- `uv run mypy clipping_ai`: clean (65 source files).
+- `node --check` passes for `app.js`, `api.js`, and `i18n.js`.
 - `uv build`: successful; the wheel includes `clipping_ai/frontend`.
 - Playwright studio smoke test passed against a temporary local backend, covering
   routing, language/RTL switching, dialogs, empty states, mobile navigation, and
@@ -141,15 +171,38 @@
   shutdown; crash recovery is verified for SIGKILL.
 - The studio UI has no source-video streaming or custom trim editor. Clip preview
   uses the rendered download endpoint, and clips use detected highlight boundaries.
+- Publishing is a local manual status only. There is no YouTube/Facebook OAuth,
+  upload integration, scheduling, or analytics.
+- Trash has no automatic expiry or background cleanup. Permanent deletion is explicit.
+- Metadata quality depends on transcript context and the configured free model;
+  provider failures are shown on the clip and can be regenerated later. Local fallback
+  is deterministic and intentionally conservative, not a substitute for AI quality.
+- Quota failover uses provider-reported retry windows or conservative local cooldowns;
+  it cannot know exact provider-side remaining quota.
+- NVIDIA catalog discovery is implemented and live catalog/model-list metadata was
+  fetched successfully, but no NVIDIA inference request was made without an API key.
+  Free Endpoint resources with API matches remain unverified until a bounded smoke
+  test succeeds; FreeLLMAPI has been removed from the bundled configuration.
+- Composition is intentionally restrained: at most one short callout from the
+  highlight title and a small effect cap. Subjective visual polish still requires
+  human review.
+- External skills are data-only manifests and remain disabled until review. They
+  cannot install code or add tools; enabling one only allows its declared built-in
+  tools to run.
 - Browser visual checks were performed through automated layout assertions and
   screenshots; subjective visual review is still recommended.
 
 ## Next
 
+- Run a human visual/interaction pass over clip detail, metadata editing, publishing,
+  selection/bulk actions, Trash, and responsive layouts at desktop and mobile widths.
 - Repeat acceptance with real podcast/interview and gaming media, including
   commentary and no-commentary variants.
 - Configure and verify local `whisper.cpp` with a multilingual model.
 - Add a human visual review pass for caption placement, readability, and framing.
-- Add a human visual review pass for the studio UI at desktop and mobile widths.
+- Add a human visual review pass for the studio UI at desktop and mobile widths,
+  including the new visual-settings and Skills controls.
+- Set `NVIDIA_API_KEY` and run bounded smoke tests for a small number of discovered
+  Free Endpoint models; only then should they be considered Ready.
 - Consider optional OCR/game-aware evidence without changing the clip rendering
   contract.

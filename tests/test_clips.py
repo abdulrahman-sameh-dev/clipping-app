@@ -19,6 +19,7 @@ from clipping_ai.clips.models import (
     ClipFormat,
     ClipJob,
     ClipQuality,
+    ClipRange,
     ClipStage,
     ClipStatus,
 )
@@ -86,6 +87,42 @@ def add_transcript_and_highlight(
             language=language,
             duration=job.metadata.duration_seconds if job.metadata else end,
             highlights=[highlight],
+        ),
+    )
+    return transcript
+
+
+def add_highlights(video, job, ranges: list[tuple[float, float]]) -> TranscriptResult:
+    duration = job.metadata.duration_seconds if job.metadata else ranges[-1][1]
+    text = "Hello world this is a test clip."
+    transcript = TranscriptResult(
+        text=text,
+        language="en",
+        duration=duration,
+        segments=[TranscriptSegment(id=0, start=0.0, end=duration, text=text)],
+    )
+    highlights = [
+        Highlight(
+            start_time=start,
+            end_time=end,
+            title=f"Test highlight {index}",
+            description="Test description",
+            selection_reason="Test reason",
+            confidence=0.9,
+            category="test",
+            transcript_segments=transcript.segments,
+        )
+        for index, (start, end) in enumerate(ranges)
+    ]
+    video.store.update(
+        job.id,
+        transcript=transcript,
+        highlight_result=HighlightResult(
+            job_id=job.id,
+            content_type=ContentType.PODCAST,
+            language="en",
+            duration=duration,
+            highlights=highlights,
         ),
     )
     return transcript
@@ -499,7 +536,8 @@ def test_render_failure_cleans_partial_output_and_allows_retry(tmp_path):
     failed = clips.process(clip.id)
     assert failed.status == ClipStatus.FAILED
     assert failed.error is not None
-    assert not clips.clip_dir(clip.id).exists()
+    assert not list(clips.clip_dir(clip.id).glob("*.part.mp4"))
+    assert not (clips.clip_dir(clip.id) / "clip_vertical_standard.mp4").exists()
     assert clips.retry(clip.id).status == ClipStatus.QUEUED
     assert clips.cancel(clip.id).status == ClipStatus.CANCELLED
 
@@ -567,6 +605,236 @@ def test_clip_api_create_render_status_download_and_config(tmp_path):
     assert download.status_code == 200
     assert download.headers["content-type"].startswith("video/mp4")
     assert len(download.content) > 0
+
+
+def test_clip_api_creates_custom_highlight_ranges(tmp_path):
+    video, clips = make_clip_service(tmp_path)
+    source = make_test_video(tmp_path / "sample.mp4", duration=4.0)
+    job = video.prepare_local(source)
+    add_highlights(video, job, [(0.2, 1.8), (2.0, 3.8)])
+    app = create_app(
+        SimpleNamespace(settings=video.settings),  # type: ignore[arg-type]
+        video_service=video,
+        clip_service=clips,
+        start_worker=False,
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        f"/api/video/jobs/{job.id}/clips",
+        json={
+            "formats": ["vertical"],
+            "ranges": [
+                {"highlight_index": 0, "start_time": 0.4, "end_time": 1.4},
+                {"highlight_index": 1, "start_time": 2.2, "end_time": 3.2},
+            ],
+            "render": False,
+        },
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["count"] == 2
+    jobs = body["jobs"]
+    assert [job["highlight_index"] for job in jobs] == [0, 1]
+    assert [job["start_time"] for job in jobs] == pytest.approx([0.4, 2.2])
+    assert [job["end_time"] for job in jobs] == pytest.approx([1.4, 3.2])
+    assert [job["duration"] for job in jobs] == pytest.approx([1.0, 1.0])
+    assert all(job["status"] == "queued" for job in jobs)
+    assert all(job["format"] == "vertical" for job in jobs)
+    assert clips.store.require(jobs[0]["id"]).highlight_index == 0
+    assert clips.store.require(jobs[1]["id"]).highlight_index == 1
+
+
+@pytest.mark.parametrize(
+    ("ranges", "extra", "message"),
+    [
+        (
+            [{"highlight_index": 0, "start_time": 0.4, "end_time": 1.4}],
+            {"highlight_indices": [0]},
+            "cannot be combined with highlight_indices",
+        ),
+        (
+            [{"highlight_index": 0, "start_time": 0.4, "end_time": 1.4}],
+            {"limit": 1},
+            "cannot be combined with limit",
+        ),
+        ([], {}, "At least one clip range is required"),
+        (
+            [{"highlight_index": 5, "start_time": 0.4, "end_time": 1.4}],
+            {},
+            "Highlight index out of range",
+        ),
+        (
+            [
+                {"highlight_index": 0, "start_time": 0.4, "end_time": 1.4},
+                {"highlight_index": 0, "start_time": 0.4, "end_time": 1.4},
+            ],
+            {},
+            "Duplicate highlight index",
+        ),
+        (
+            [{"highlight_index": 0, "start_time": 0.4, "end_time": 0.8}],
+            {},
+            "shorter than the minimum clip duration",
+        ),
+        (
+            [{"highlight_index": 0, "start_time": 0.4, "end_time": 5.0}],
+            {},
+            "exceeds source duration",
+        ),
+    ],
+)
+def test_clip_api_rejects_invalid_ranges(tmp_path, ranges, extra, message):
+    video, clips = make_clip_service(tmp_path)
+    source = make_test_video(tmp_path / "sample.mp4", duration=4.0)
+    job = video.prepare_local(source)
+    add_highlights(video, job, [(0.2, 1.8), (2.0, 3.8)])
+    app = create_app(
+        SimpleNamespace(settings=video.settings),  # type: ignore[arg-type]
+        video_service=video,
+        clip_service=clips,
+        start_worker=False,
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        f"/api/video/jobs/{job.id}/clips",
+        json={"formats": ["vertical"], "ranges": ranges, "render": False, **extra},
+    )
+    assert response.status_code == 400, response.text
+    assert message in response.json()["error"]["message"]
+
+
+@pytest.mark.parametrize(
+    "range_item",
+    [
+        {"start_time": 0.4, "end_time": 1.4},
+        {"highlight_index": 0, "start_time": 0.4},
+        {"highlight_index": 0, "start_time": 1.4, "end_time": 0.4},
+        {"highlight_index": -1, "start_time": 0.4, "end_time": 1.4},
+        {"highlight_index": 0, "start_time": -0.4, "end_time": 1.4},
+    ],
+)
+def test_clip_api_rejects_malformed_ranges(tmp_path, range_item):
+    video, clips = make_clip_service(tmp_path)
+    source = make_test_video(tmp_path / "sample.mp4", duration=2.0)
+    job = video.prepare_local(source)
+    add_highlights(video, job, [(0.2, 1.8)])
+    app = create_app(
+        SimpleNamespace(settings=video.settings),  # type: ignore[arg-type]
+        video_service=video,
+        clip_service=clips,
+        start_worker=False,
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        f"/api/video/jobs/{job.id}/clips",
+        json={"formats": ["vertical"], "ranges": [range_item], "render": False},
+    )
+    assert response.status_code == 422, response.text
+
+
+def test_clip_service_validates_ranges_directly(tmp_path):
+    video, clips = make_clip_service(tmp_path)
+    source = make_test_video(tmp_path / "sample.mp4", duration=4.0)
+    job = video.prepare_local(source)
+    add_highlights(video, job, [(0.2, 1.8), (2.0, 3.8)])
+
+    too_many = [ClipRange(highlight_index=0, start_time=0.4, end_time=1.4)] * 101
+    with pytest.raises(AIError) as excinfo:
+        clips.create_for_job(job.id, ranges=too_many)
+    assert excinfo.value.category.value == "invalid_request"
+    assert "At most 100 clip ranges" in excinfo.value.message
+
+    with pytest.raises(AIError) as excinfo:
+        clips.create_for_job(job.id, ranges=[{"highlight_index": 0}])
+    assert excinfo.value.category.value == "invalid_request"
+    assert "Invalid clip range" in excinfo.value.message
+
+    short_max = ClipService(
+        video.settings,
+        video_service=video,
+        config=small_clip_config(max_clip_seconds=1.5, effects_zoom_duration=1.0),
+    )
+    with pytest.raises(AIError) as excinfo:
+        short_max.create_for_job(
+            job.id,
+            ranges=[ClipRange(highlight_index=0, start_time=0.2, end_time=2.0)],
+        )
+    assert excinfo.value.category.value == "invalid_request"
+    assert "longer than the maximum clip duration" in excinfo.value.message
+
+
+@requires_ffmpeg
+def test_custom_range_render_uses_edited_bounds(tmp_path):
+    video, clips = make_clip_service(tmp_path)
+    source = make_test_video(tmp_path / "sample.mp4", duration=3.0)
+    job = video.prepare_local(source)
+    add_transcript_and_highlight(video, job, highlight_start=0.2, highlight_end=2.8)
+    clip = clips.create_for_job(
+        job.id,
+        formats=[ClipFormat.VERTICAL],
+        ranges=[ClipRange(highlight_index=0, start_time=0.5, end_time=1.5)],
+        captions=True,
+    )[0]
+    assert clip.start_time == pytest.approx(0.5)
+    assert clip.end_time == pytest.approx(1.5)
+    assert clip.duration == pytest.approx(1.0)
+
+    finished = clips.process(clip.id)
+    assert finished.status == ClipStatus.READY, finished.error
+    assert finished.output_path is not None and finished.output_path.is_file()
+    assert finished.caption_path is not None and finished.caption_path.is_file()
+    info = probe_media(finished.output_path, clips.config)
+    assert info.duration == pytest.approx(1.0, abs=0.35)
+    caption_text = finished.caption_path.read_text(encoding="utf-8")
+    assert "Dialogue: 0,0:00:00.00," in caption_text
+
+
+def test_clip_api_filters_by_ids(tmp_path):
+    video, clips = make_clip_service(tmp_path)
+    first = clips.store.create(
+        id="1" * 32,
+        source_job_id="b" * 32,
+        start_time=0.0,
+        end_time=2.0,
+        format=ClipFormat.VERTICAL,
+        width=180,
+        height=320,
+        fps=30.0,
+        quality=ClipQuality.STANDARD,
+        fit=ClipFit.CROP,
+        captions=False,
+    )
+    second = clips.store.create(
+        id="2" * 32,
+        source_job_id="b" * 32,
+        start_time=2.0,
+        end_time=4.0,
+        format=ClipFormat.SQUARE,
+        width=180,
+        height=180,
+        fps=30.0,
+        quality=ClipQuality.STANDARD,
+        fit=ClipFit.CROP,
+        captions=False,
+    )
+    app = create_app(
+        SimpleNamespace(settings=video.settings),  # type: ignore[arg-type]
+        video_service=video,
+        clip_service=clips,
+        start_worker=False,
+    )
+    client = TestClient(app)
+
+    listed = client.get("/api/clip-jobs", params={"ids": f"{first.id},{second.id}"})
+    assert listed.status_code == 200
+    assert {item["id"] for item in listed.json()["jobs"]} == {first.id, second.id}
+
+    filtered = client.get("/api/clip-jobs", params={"ids": second.id})
+    assert filtered.status_code == 200
+    assert [item["id"] for item in filtered.json()["jobs"]] == [second.id]
 
 
 def test_clip_store_status_transitions_and_recovery(tmp_path):

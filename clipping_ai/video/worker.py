@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from uuid import uuid4
 
 from clipping_ai.errors import AIError
 from clipping_ai.video.models import VideoJob
@@ -18,6 +19,7 @@ class VideoWorker:
         self.poll_seconds = poll_seconds or service.config.worker_poll_seconds
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        self._owner = f"video-worker-{uuid4().hex}"
 
     @property
     def running(self) -> bool:
@@ -46,7 +48,7 @@ class VideoWorker:
         if job is None:
             return None
         try:
-            return self.service.process(job.id)
+            return self.service.process(job.id, owner=self._owner)
         except AIError as exc:
             logger.warning("Video job %s failed: %s", job.id, exc.message)
             return self.service.store.get(job.id)

@@ -92,6 +92,12 @@
     "effects_transition_duration": 0.3,
     "auto_vertical_fit": true,
     "vertical_landscape_fit": "blur",
+    "metadata_auto_generate": true,
+    "metadata_batch_size": 6,
+    "metadata_min_hashtags": 2,
+    "metadata_max_hashtags": 4,
+    "metadata_title_max_chars": 120,
+    "metadata_description_max_chars": 2200,
     "caption_border_style": 3,
     "caption_box_padding_ratio": 0.008,
     "caption_encoding": -1

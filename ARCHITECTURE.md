@@ -74,7 +74,9 @@ Loads and validates:
 
 The model registry is an explicit allow-list. A model is not usable unless it is
 present, enabled, and marked `free: true`. Local verification updates are written
-to `config/local/models.json`.
+to `config/local/models.json`; provider enable toggles are written to
+`config/local/providers.json`. Gateway model entries may declare
+`underlying_provider`/`underlying_model` so quota cooldown applies to both routes.
 
 ### FreeOnlyPolicy (`clipping_ai/policy.py`)
 
@@ -100,6 +102,19 @@ The central orchestration layer:
 - records usage;
 - runs connection tests;
 - verifies free pricing where a provider exposes it.
+
+### OpenAI-compatible provider (`clipping_ai/providers/openai_compatible.py`)
+
+A generic adapter for explicitly configured free gateways or local proxies. It posts
+OpenAI-style chat completions to a configured `base_url`, sends a bearer key from the
+configured environment variable, and normalises errors through the shared mapping.
+It never infers a URL or model. The NVIDIA entry uses this adapter with
+`https://integrate.api.nvidia.com/v1`. `clipping_ai/providers/nvidia_catalog.py`
+discovers endpoint resources from NVIDIA's structured catalog, keeps only Free
+Endpoint resources, classifies text capability from catalog labels, cross-checks the
+public `/v1/models` list, and caches metadata in `config/local/nvidia-catalog.json`.
+Catalog eligibility does not mark a model Ready: a bounded smoke test must succeed
+before `verification_status` becomes `verified`.
 
 ### Text providers (`clipping_ai/providers/litellm_text.py`)
 
@@ -163,7 +178,8 @@ downloads are removed after each attempt.
   related fragments across small or bridged gaps. Relatedness uses transcript
   continuity markers and lexical overlap; unrelated nearby ideas remain separate.
   Merged highlights retain the complete transcript range and get a completeness
-  signal.
+  signal. `split_long_highlights` splits only moments beyond the preferred target
+  plus tolerance, always at transcript boundaries, preserving timestamps and coverage.
 - `llm.py`: optional structured `highlight_detection` refinement through
   `ProviderManager`; validates model output and clamps suggestions to media and
   transcript bounds.
@@ -186,16 +202,24 @@ transcript context. Highlight detection does not modify or replace source media.
   `render_diagnostics.json` beside the output.
 - `ClipJobStore`: persists clip jobs in a `clip_jobs` table in the shared
   `data/jobs.db`, including source job/highlight, source timestamps, format, fit,
-  quality, caption state, output path, size, status/stage/progress, and errors.
+  quality, caption state, output path, size, status/stage/progress, errors,
+  publishing metadata, manual published status, and soft-deletion time. Source jobs
+  persist manual `all_clips_published` completion and its timestamp.
 - `editing.py`: builds an `EditPlan` from transcript words, highlight confidence,
   detection signals, and optional media signals. It groups short caption phrases,
   scores restrained important-word emphasis, and selects at most a small number of
   visual effects. No effect is planned when evidence is below the configured
   threshold.
-- `renderer.py`: resolves source, output, and caption paths, creates the output
-  parent, probes the source and output, builds an FFmpeg filter graph for crop, pad,
-  or blurred-background fit, then optionally chains a smoothstep-eased zoompan,
-  timeline emphasis pulse, and boundary fades before burning ASS captions. Source
+- `composition/`: `VisualSettings` validates per-clip enhancement/intensity/category
+  choices; `build_composition_plan` reuses the existing `EditPlan`, scales and caps
+  effects, and derives at most one restrained top-safe-area callout from the
+  highlight title. `write_overlay_ass` renders callouts as ASS so libass performs
+  Arabic shaping instead of manual reversal.
+- `renderer.py`: resolves source, output, caption, and overlay paths, creates the
+  output parent, probes the source and output, builds an FFmpeg filter graph for
+  crop, pad, or blurred-background fit, then optionally chains a smoothstep-eased
+  zoompan, timeline emphasis pulse, and boundary fades before burning caption and
+  callout ASS files. Source
   audio is mapped unchanged in content, output is written to an absolute `.part.mp4`,
   verified with ffprobe, then atomically replaced. Timeouts, free-disk checks,
   cancellation polling, and cleanup are enforced. The result includes the selected
@@ -206,17 +230,53 @@ transcript context. Highlight detection does not modify or replace source media.
   style uses a resolution-scaled font, a background box with a semi-transparent
   back colour, and `Encoding=-1` so libass performs whole-text Arabic shaping and
   bidirectional layout; text is never manually reversed.
+- `metadata.py`: `ClipMetadataService` generates title, description, hashtags, and
+  language from clip-range transcript/highlight context through the
+  `title_generation` route. It batches clips by source, validates every response item
+  by clip ID, splits failed batches, and falls back to deterministic local metadata
+  when AI is unavailable. Scheduler threads coalesce duplicate source work and retry
+  after new clips arrive. Successful values use `generated`, local values use
+  `local_fallback`, and quota-only deferrals use `deferred_quota`. Manual edits set
+  `manually_edited` and require explicit force before regeneration.
 - `ClipWorker`: one daemon thread that claims the oldest queued clip, processes it,
-  and recovers interrupted `processing` jobs on startup.
+  recovers interrupted `processing` jobs, and resumes pending source metadata batches
+  on startup.
 - `config/clips.json`: output dimensions, quality/CRF/preset, fit, FPS, dynamic
   caption phrase limits and styling, automatic effect thresholds, auto vertical fit,
-  FFmpeg/ffprobe timeouts, disk guard, and worker polling.
+  metadata generation/limits, FFmpeg/ffprobe timeouts, disk guard, and worker polling.
 
 Clip jobs move through `queued`, `processing`, `ready`, `failed`, and `cancelled`.
 Stages are `queued`, `captions`, `rendering`, `verifying`, `ready`, `failed`, and
 `cancelled`. Captions are optional per clip. If captions are requested without a
 transcript, creation fails rather than synthesising text. The original source video
-and audio are never modified, replaced, or synthesised.
+and audio are never modified, replaced, or synthesised. Source-level publishing
+completion is manual, persists across refresh/trash/restore, and resets when a new
+clip is created. Counts exclude trashed clips and never auto-complete the source.
+
+### Skills and tools (`clipping_ai/skills/`)
+
+- `SkillManifest`/`SkillRecord` validate safe IDs, declared tools, permissions,
+  timeout, and concurrency.
+- `SkillRegistry` discovers built-in and optional external manifests from
+  `config/skills/`, persists enable/review state in `config/local/skills.json`, and
+  rejects unknown tools. External skills are disabled until explicitly reviewed.
+- `ToolRegistry` contains the only executable handlers. Skills cannot provide code.
+- `SkillExecutor` enforces enabled/reviewed state and declared permissions, then runs
+  declared built-in tools with a timeout. Current tools plan captions, bounded visual
+  emphasis, one callout, or conservative educational explanation.
+
+### Trash and deletion (`clipping_ai/trash.py`)
+
+- `TrashService` combines soft-deleted source videos and clips into one list with
+  kind, title, deletion time, status, duration, format, and publishing state.
+- Restore and permanent deletion accept mixed batches and return per-item results, so
+  one invalid target does not block the rest.
+- Normal deletion is always soft (`deleted_at`). Permanent deletion is only allowed
+  for trashed items. Source deletion removes only the source job directory; rendered
+  clips remain independent. Clip deletion removes only files inside the clip's owned
+  directory, then deletes the clip row.
+- Active video/analysis/clip creation guards reject trashed sources; metadata,
+  publishing, and download guards reject trashed clips.
 
 ### Storage
 
@@ -226,6 +286,8 @@ and audio are never modified, replaced, or synthesised.
 - `data/videos/jobs/<job_id>/`: original input, `audio/audio.*`, and `audio/chunks/*`.
 - `data/clips/jobs/<clip_id>/`: rendered MP4, optional `captions.ass`, and
   `render_diagnostics.json` for successful renders.
+- Soft-deleted source/clip rows stay in `data/jobs.db` with their files until restored
+  or permanently deleted. Trash has no automatic expiry.
 - `config/local/`: local model, video, analysis, and clip overrides plus verification
   results.
 
@@ -242,7 +304,10 @@ PostgreSQL, Celery, or external queue.
 6. Call the provider.
 7. Map provider exceptions to the internal error taxonomy.
 8. Retry the same provider when safe.
-9. On eligible errors, fall back to the next approved free candidate.
+9. On eligible errors, fall back to the next approved free candidate. Free-quota
+   exhaustion blocks that provider for its cooldown window (provider `retry_after`,
+   next UTC midnight for daily quotas, or one hour) and is never routed to paid
+   models.
 10. Parse and validate structured output, with bounded repair retries.
 11. Record usage.
 12. Return data plus provider/model/attempt metadata.
@@ -307,20 +372,27 @@ flow. Those are separate analysis steps over the prepared job.
 2. Validate each highlight's start/end, minimum/maximum duration, and source bounds.
 3. Create one clip job per highlight and requested format. Captions are rejected when
    the source job has no transcript.
-4. Build an edit plan from the stored highlight, transcript word timestamps, and
+4. Build a base edit plan from the stored highlight, transcript word timestamps, and
    available signals. For caption jobs, group short phrases, offset timestamps, mark
    one confidence-gated important word per cue, and write an ASS file. libass handles
    Arabic shaping and RTL.
-5. Create the job output directory, resolve all paths, then render with FFmpeg from
+5. Apply the persisted `VisualSettings`: scale/cap effects by intensity, honour
+   category toggles, and optionally derive one top-safe callout from the highlight
+   title. Write callouts to a separate ASS file.
+6. Create the job output directory, resolve all paths, then render with FFmpeg from
    the original source using input seek, a format-specific filter graph, optional
-   restrained effects, the source audio stream, and a temporary `.part.mp4`.
-6. Poll cancellation, enforce the render timeout and disk guard, and terminate FFmpeg
+   restrained effects, caption/callout ASS chaining, the source audio stream, and a
+   temporary `.part.mp4`.
+7. Poll cancellation, enforce the render timeout and disk guard, and terminate FFmpeg
    on cancellation or timeout.
-7. Probe the temporary output for video, source audio, dimensions, and duration.
-8. Write `render_diagnostics.json` with the edit plan, effect filters, full filter
-   graph, caption style, and output metadata.
-9. Atomically move the verified file to its final path and mark the clip ready.
-10. On failure or cancellation, remove partial/temporary files unless configured to
+8. Probe the temporary output for video, source audio, dimensions, and duration.
+9. Write `render_diagnostics.json` with the edit plan, composition plan, effect
+   filters, full filter graph, caption style, overlay path, and output metadata.
+10. Atomically move the verified file to its final path and mark the clip ready.
+11. Metadata is normally scheduled as a non-blocking source batch when clips are
+    created, before rendering. It uses only stored transcript/highlight context;
+    failures are recorded on each clip without changing render status.
+12. On failure or cancellation, remove partial/temporary files unless configured to
     keep failed artifacts. A failed or cancelled clip can be retried.
 
 ## Concurrency and limits
@@ -335,7 +407,10 @@ cannot render the same job concurrently.
 ## Extension points
 
 - Add a new text provider by implementing `BaseTextProvider` and adding a provider
-  `type` in configuration.
+  `type` in configuration. OpenAI-compatible free gateways use the generic adapter
+  with an explicit `base_url`.
+- Add a skill as a JSON manifest that declares only registered tools; external
+  manifests stay disabled until reviewed.
 - Add a new speech provider by implementing `BaseSpeechProvider`.
 - Add a task by adding a Pydantic schema in `schemas.py`, task instructions in
   `structured.py`, and routing candidates.

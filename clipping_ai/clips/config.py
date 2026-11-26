@@ -144,6 +144,12 @@ class ClipConfig(BaseModel):
     effects_transition_duration: float = Field(default=0.3, gt=0, le=2)
     auto_vertical_fit: bool = True
     vertical_landscape_fit: ClipFit = ClipFit.BLUR
+    metadata_auto_generate: bool = True
+    metadata_batch_size: int = Field(default=6, ge=1, le=12)
+    metadata_min_hashtags: int = Field(default=2, ge=0, le=10)
+    metadata_max_hashtags: int = Field(default=4, ge=1, le=10)
+    metadata_title_max_chars: int = Field(default=120, ge=10, le=300)
+    metadata_description_max_chars: int = Field(default=2200, ge=50, le=10000)
 
     @field_validator("pixel_format", "audio_codec", "caption_shaping")
     @classmethod
@@ -159,6 +165,8 @@ class ClipConfig(BaseModel):
             raise ValueError("min_clip_seconds must be <= max_clip_seconds")
         if self.caption_min_duration > self.caption_max_duration:
             raise ValueError("caption_min_duration must be <= caption_max_duration")
+        if self.metadata_min_hashtags > self.metadata_max_hashtags:
+            raise ValueError("metadata_min_hashtags must be <= metadata_max_hashtags")
         if self.effects_zoom_duration > self.max_clip_seconds:
             raise ValueError("effects_zoom_duration must be <= max_clip_seconds")
         for fmt in ClipFormat:

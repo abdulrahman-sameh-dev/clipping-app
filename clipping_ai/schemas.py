@@ -82,6 +82,14 @@ class GeneratedMetadata(StrictModel):
     language: str
 
 
+class GeneratedMetadataItem(GeneratedMetadata):
+    clip_id: str = Field(min_length=1, max_length=64)
+
+
+class GeneratedMetadataBatch(StrictModel):
+    items: list[GeneratedMetadataItem] = Field(default_factory=list)
+
+
 class TranslationResult(StrictModel):
     translated_text: str
     source_language: str | None = None
@@ -144,6 +152,8 @@ __all__ = [
     "ClipEvaluation",
     "ContentAnalysis",
     "GeneratedMetadata",
+    "GeneratedMetadataBatch",
+    "GeneratedMetadataItem",
     "HighlightAnalysis",
     "HighlightSuggestion",
     "TranslationResult",

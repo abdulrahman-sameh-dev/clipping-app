@@ -62,14 +62,21 @@ def test_unverified_manual_approval_can_be_allowed():
     assert policy.evaluate(model(free_verified=False), "content_analysis").allowed is True
 
 
-def test_fallback_policy_is_explicit_and_quota_safe():
+def test_fallback_policy_allows_free_quota_failover_by_default():
     policy = FreeOnlyPolicy(PolicyConfig())
     assert policy.can_fallback(
         AIError(ErrorCategory.RATE_LIMIT_EXCEEDED, "slow down", retryable=True)
     )
-    assert not policy.can_fallback(
+    assert policy.can_fallback(
         AIError(ErrorCategory.FREE_QUOTA_EXHAUSTED, "quota", retryable=False)
     )
     assert not policy.can_fallback(
         AIError(ErrorCategory.MISSING_API_KEY, "key", retryable=False)
+    )
+
+
+def test_fallback_policy_can_keep_quota_non_retryable():
+    policy = FreeOnlyPolicy(PolicyConfig(fallback_on_quota_exhausted=False))
+    assert not policy.can_fallback(
+        AIError(ErrorCategory.FREE_QUOTA_EXHAUSTED, "quota", retryable=False)
     )

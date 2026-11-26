@@ -136,6 +136,10 @@ def test_analysis_commands_pass_options(cli_analysis_env, capsys):
             "model": None,
             "use_llm": False,
             "refresh": True,
+            "multi_pass": None,
+            "window_seconds": None,
+            "overlap_seconds": None,
+            "max_highlights": None,
         },
     )
     assert "highlights: 1" in capsys.readouterr().out
@@ -153,6 +157,10 @@ def test_analysis_commands_pass_options(cli_analysis_env, capsys):
             "content_type": ContentType.PODCAST,
             "use_llm": None,
             "refresh": False,
+            "multi_pass": None,
+            "window_seconds": None,
+            "overlap_seconds": None,
+            "max_highlights": None,
         },
     )
 

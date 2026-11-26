@@ -41,6 +41,7 @@ RETRYABLE_CATEGORIES: frozenset[ErrorCategory] = frozenset(
 FALLBACK_CATEGORIES: frozenset[ErrorCategory] = frozenset(
     {
         ErrorCategory.RATE_LIMIT_EXCEEDED,
+        ErrorCategory.FREE_QUOTA_EXHAUSTED,
         ErrorCategory.MODEL_UNAVAILABLE,
         ErrorCategory.PROVIDER_UNAVAILABLE,
         ErrorCategory.NETWORK_TIMEOUT,
@@ -57,7 +58,6 @@ NON_FALLBACK_CATEGORIES: frozenset[ErrorCategory] = frozenset(
         ErrorCategory.INVALID_REQUEST,
         ErrorCategory.UNSUPPORTED_CAPABILITY,
         ErrorCategory.POLICY_VIOLATION,
-        ErrorCategory.FREE_QUOTA_EXHAUSTED,
     }
 )
 
