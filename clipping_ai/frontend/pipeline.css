@@ -25,3 +25,12 @@
 }
 .pl-page .form-section { margin-block-end: 16px; }
 .pl-page .form-actions { display: flex; gap: 8px; align-items: center; margin-top: 12px; }
+.pl-check { display: flex; gap: 8px; align-items: center; margin-block: 8px; font-size: 0.9rem; }
+.pl-check input { width: 18px; height: 18px; flex: none; margin: 0; }
+.pl-head { font-size: 0.85rem; opacity: 0.8; }
+.pl-slot { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-block: 8px; }
+.pl-slot input[type="number"] { width: 4.5rem; }
+.pl-status.is-state-scheduled, .pl-status.is-state-went_live, .pl-status.is-state-public { background: rgba(80, 180, 120, 0.25); }
+.pl-status.is-state-not_uploaded { background: rgba(232, 132, 60, 0.25); }
+.pl-status.is-verdict-strong { background: rgba(80, 180, 120, 0.3); }
+.pl-status.is-verdict-weak { background: rgba(220, 80, 80, 0.25); }
