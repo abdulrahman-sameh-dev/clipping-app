@@ -3,6 +3,7 @@ import { getLocale, t, toggleLocale } from "./i18n.js";
 import { createPoller } from "./polling.js";
 import { createTrimEditor } from "./trim-editor.js";
 import * as ui from "./ui.js";
+import { pipelineText, pipelineView } from "./pipeline.js";
 import { mountYoutubePanel, youtubePanelHtml } from "./youtube.js";
 
 const main = document.getElementById("main");
@@ -147,6 +148,7 @@ function parseRoute() {
   const segments = pathPart.split("/").filter(Boolean);
   if (!segments.length) return { name: "dashboard", params };
   const [root, id, sub] = segments;
+  if (root === "pipeline") return { name: "pipeline", params };
   if (root === "library") return { name: "library", params };
   if (root === "jobs") return { name: "jobs", params };
   if (root === "clips") return { name: "clips", params };
@@ -166,6 +168,8 @@ async function renderRoute() {
   const route = parseRoute();
   updateNavigation(route);
   updateBreadcrumb(route);
+  const pipelineLabel = document.getElementById("nav-pipeline-label");
+  if (pipelineLabel) pipelineLabel.textContent = pipelineText("nav");
   main.innerHTML = loadingState();
   try {
     const view = await createView(route, token);
@@ -213,7 +217,8 @@ function updateNavigation(route) {
 
 function updateBreadcrumb(route) {
   const items = [{ label: t("nav.dashboard"), href: "#/" }];
-  if (route.name === "library") items.push({ label: t("nav.library") });
+  if (route.name === "pipeline") items.push({ label: pipelineText("nav") });
+  else if (route.name === "library") items.push({ label: t("nav.library") });
   else if (route.name === "jobs") items.push({ label: t("nav.jobs") });
   else if (route.name === "clips") items.push({ label: t("nav.clips") });
   else if (route.name === "clip") {
@@ -251,6 +256,8 @@ async function createView(route, token) {
   switch (route.name) {
     case "dashboard":
       return dashboardView(token);
+    case "pipeline":
+      return pipelineView(token, () => token === state.token);
     case "library":
       return libraryView(token);
     case "analysis":
