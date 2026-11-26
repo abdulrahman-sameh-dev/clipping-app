@@ -20,14 +20,16 @@ from clipping_ai.clips.service import ClipService
 from clipping_ai.clips.worker import ClipWorker
 from clipping_ai.composition.models import VisualSettings
 from clipping_ai.errors import AIError, ErrorCategory
+from clipping_ai.facebook.config import FacebookSettings
+from clipping_ai.facebook.routes import register_facebook_routes
 from clipping_ai.highlights.models import ContentType
 from clipping_ai.manager import ProviderManager
+from clipping_ai.pipeline.routes import register_pipeline_routes
 from clipping_ai.recovery import (
     DataDirectoryLock,
     StageStore,
     StartupReconciler,
 )
-from clipping_ai.pipeline.routes import register_pipeline_routes
 from clipping_ai.settings import get_settings
 from clipping_ai.skills.executor import SkillExecutor
 from clipping_ai.skills.registry import SkillRegistry
@@ -205,6 +207,8 @@ def create_app(
     start_clip_worker: bool | None = None,
     youtube_settings: YouTubeSettings | None = None,
     youtube_uploader: Any | None = None,
+    facebook_settings: FacebookSettings | None = None,
+    facebook_client: Any | None = None,
     sheet_client: Any | None = None,
 ) -> FastAPI:
     settings = manager.settings if manager is not None else get_settings()
@@ -583,7 +587,6 @@ def create_app(
             "discovery_progress": _analysis(request).discovery_progress(job_id),
         }
 
-
     @app.post("/api/video/jobs/{job_id}/analyze")
     def analyze_video_job(
         request: Request,
@@ -784,6 +787,12 @@ def create_app(
         settings=settings,
         youtube_settings=youtube_settings,
         uploader=youtube_uploader,
+    )
+    register_facebook_routes(
+        app,
+        settings=settings,
+        facebook_settings=facebook_settings,
+        facebook_client=facebook_client,
     )
     register_pipeline_routes(
         app,
