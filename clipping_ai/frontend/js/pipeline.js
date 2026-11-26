@@ -4,6 +4,7 @@
 import { API_BASE } from "./api.js";
 import { getLocale } from "./i18n.js";
 import * as ui from "./ui.js";
+import { facebookSectionHtml, mountFacebookSection } from "./facebook.js";
 
 const TEXT = {
   en: {
@@ -897,6 +898,7 @@ export async function pipelineView(token, isCurrent = () => true) {
       <div class="form-section-header"><div><h3>${ui.esc(tr("connections"))}</h3><p>${ui.esc(tr("connectionsHint"))}</p></div></div>
       <div id="pl-connections-body">${connectionsHtml(connStatus)}</div>
     </section>
+    ${facebookSectionHtml()}
     <section class="form-section" id="pl-schedule">
       <div class="form-section-header"><div><h3>${ui.esc(tr("schedule"))}</h3><p>${ui.esc(tr("scheduleHint"))}</p></div></div>
       <div id="pl-schedule-body" class="pl-queue">${scheduleHtml(sched)}</div>
@@ -962,6 +964,7 @@ export async function pipelineView(token, isCurrent = () => true) {
     const root = document.getElementById("pl-review")?.closest(".pl-page");
     if (!root) return;
     announceConnectResult();
+    mountFacebookSection(root);
     const run = async (button, work) => {
       if (button.disabled) return;
       button.disabled = true;
