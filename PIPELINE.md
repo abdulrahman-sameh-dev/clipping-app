@@ -105,3 +105,51 @@ your channel). Auto-publish is limited to private scheduled uploads, 5 per run, 
 confirm flag, but it is still your channel. Do not expose the port (no tunnel, no 0.0.0.0).
 The Google tokens are local files; delete `data/google/` to sign out, or revoke access at
 https://myaccount.google.com/permissions.
+
+## Connections, channel schedule and several channels (web UI)
+
+**Connect Google without the terminal.** The Pipeline page has a Connections section. Each row
+opens Google's consent page; Google sends the browser back to this local app
+(`http://127.0.0.1:PORT/api/google/callback`), which stores the token in `data/` (0600,
+git-ignored). Three separate sign-ins, each with the narrowest scope:
+
+| Sign-in | Scope | Per |
+| --- | --- | --- |
+| Google Sheets | `spreadsheets.readonly` | all channels |
+| YouTube Analytics and schedule | `yt-analytics.readonly` + `youtube.readonly` | channel |
+| YouTube upload | `youtube.upload` (the only one that can publish) | channel |
+
+Disconnect deletes the token on this computer. To fully revoke, also remove the app in your
+Google account. The terminal commands (`pipeline auth sheets|analytics|upload --channel ID`)
+still work.
+
+Redirect handling: a random one-time `state` and a PKCE verifier are kept in memory for ten
+minutes; a callback without a matching state saves nothing. Google's code is never put in the
+address you return to, and the redirect sends `Referrer-Policy: no-referrer`. Your OAuth client
+must be a **Desktop app** client (loopback redirects on any port). If you made a Web client,
+Google shows `redirect_uri_mismatch`; add the exact URI the page prints, or make a Desktop
+client. Analytics sign-ins made before this feature only have the analytics scope: press
+Reconnect once.
+
+**No-login API.** The API still has no password. The routes that sign in, sign out, change
+channels or upload now also refuse requests whose Host is not `127.0.0.1`/`localhost`/`::1`
+or whose Origin is another website (blocks other sites and DNS rebinding). Any program on this
+computer can still call the API, so keep it on localhost. To use another host name set
+`CLIPPING_AI_ALLOWED_HOSTS=name1,name2`. A token for the API is still the next step before
+running anything in the background.
+
+**The channel's own schedule.** With the analytics sign-in, the tool reads the channel's
+uploads list (read-only) and keeps the videos with a future publish time, whoever scheduled
+them (YouTube Studio, phone, this tool). The plan, the free-day count and the 14-day review
+use them, so a channel scheduled until December 7 gets new clips from December 8. A video
+uploaded by this tool is counted once. If the schedule cannot be read right now, the plan
+warns, and auto-publish refuses unless you tick "Upload anyway without the channel schedule".
+Reads are reused for 10 minutes. Cost: about 3 YouTube quota units per read.
+
+**Several channels.** Add channels on the Pipeline page. Each has: name, category (general,
+gaming, religious, educational, entertainment, news, other), daily slot, its own sheet link,
+its own analytics thresholds (strong/weak as multiples of the median) and its own YouTube
+sign-ins. A link belongs to one channel. A clip belongs to the channel of the link that made
+it (change it with `PUT /api/pipeline/clips/{id}/channel`), and once uploaded it stays with
+the channel it was uploaded to. The clip page's YouTube panel still uses the first channel.
+The first channel is the one that existed before: it keeps its sheet link, slot and tokens.
